@@ -1099,32 +1099,38 @@ async function loadList(key){
   // Cek format lama & potongan pertama SEKALIGUS (paralel, bukan berurutan) —
   // ini langkah yang paling sering dijalankan, jadi paling penting dipercepat.
   const [legacy, chunk0] = await Promise.all([ fetchRaw(key), fetchRaw(`${key}::c0`) ]);
+  // PENTING: format potongan (chunk) diprioritaskan sebagai sumber kebenaran
+  // begitu ia ada — walau baris format lama masih tersisa (mis. karena proses
+  // pembersihannya sempat gagal sekali). Kalau format lama yang diprioritaskan,
+  // perubahan baru yang sudah tersimpan di potongan bisa "hilang" lagi setiap
+  // kali dimuat karena tertimpa data lama yang seharusnya sudah tidak dipakai —
+  // inilah penyebab Target/Realisasi Pipeline sempat kembali ke 0.
+  if(chunk0 !== null){
+    let all = [];
+    try{
+      const part = JSON.parse(chunk0);
+      if(Array.isArray(part)) all = part;
+    }catch(e){}
+    if(all.length < CHUNK_SIZE) return all;
+    let i = 1;
+    while(i < 2000){
+      const raw = await fetchRaw(`${key}::c${i}`);
+      if(raw === null) break;
+      try{
+        const part = JSON.parse(raw);
+        if(Array.isArray(part)) all = all.concat(part);
+      }catch(e){}
+      i++;
+    }
+    return all;
+  }
   if(legacy !== null){
     try{
       const arr = JSON.parse(legacy);
       if(Array.isArray(arr)) return arr;
-    }catch(e){ /* bukan format lama yang valid, lanjut ke format potongan */ }
+    }catch(e){ /* bukan format lama yang valid */ }
   }
-  if(chunk0 === null) return [];
-  let all = [];
-  try{
-    const part = JSON.parse(chunk0);
-    if(Array.isArray(part)) all = part;
-  }catch(e){}
-  // Kalau potongan pertama belum penuh, sudah pasti tidak ada potongan lanjutan —
-  // hemat request tambahan untuk kasus paling umum (daftar kecil/sedang).
-  if(all.length < CHUNK_SIZE) return all;
-  let i = 1;
-  while(i < 2000){ // jaring pengaman supaya tidak pernah loop tanpa henti
-    const raw = await fetchRaw(`${key}::c${i}`);
-    if(raw === null) break;
-    try{
-      const part = JSON.parse(raw);
-      if(Array.isArray(part)) all = all.concat(part);
-    }catch(e){}
-    i++;
-  }
-  return all;
+  return [];
 }
 async function saveList(key, arr){
   const chunks = [];

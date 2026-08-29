@@ -968,15 +968,19 @@ function defaultConfig(){
 }
 let CFG = defaultConfig();
 async function loadConfig(){
-  try{
-    const raw = await loadList(KEY_CONFIG); // disimpan sebagai array berisi satu objek config
-    if(Array.isArray(raw) && raw.length && raw[0] && typeof raw[0]==="object"){
-      CFG = {...defaultConfig(), ...raw[0]};
-    } else {
-      CFG = defaultConfig();
-      await saveConfig(); // simpan default sekali di awal supaya konsisten untuk semua
-    }
-  }catch(e){ CFG = defaultConfig(); }
+  const raw = await loadList(KEY_CONFIG); // disimpan sebagai array berisi satu objek config
+  // Catatan: kalau fetch di atas gagal (jaringan bermasalah), loadList/fetchRaw
+  // sekarang MELEMPAR error (bukan diam-diam mengembalikan array kosong) —
+  // sehingga baris di bawah ini HANYA berjalan kalau data benar-benar
+  // berhasil diambil dari server, dan kita bisa yakin `raw` mencerminkan
+  // keadaan server yang sesungguhnya, bukan sekadar "gagal ambil data".
+  if(Array.isArray(raw) && raw.length && raw[0] && typeof raw[0]==="object"){
+    CFG = {...defaultConfig(), ...raw[0]};
+  } else {
+    // Server memang belum pernah punya config sama sekali (pemakaian pertama kali) -> wajar pakai default & simpan sekali.
+    CFG = defaultConfig();
+    await saveConfig();
+  }
 }
 async function saveConfig(){
   const payload = {...CFG, __isConfig:true};
@@ -1064,7 +1068,17 @@ async function fetchRaw(key){
       const res = await fetch(`${APPS_SCRIPT_URL}?key=${encodeURIComponent(key)}`);
       const data = await res.json();
       return (data && data.value != null) ? data.value : null;
-    }catch(e){ window.__storageErrors.push(String(e && e.message || e)); return null; }
+    }catch(e){
+      window.__storageErrors.push(String(e && e.message || e));
+      // PENTING: lempar ulang error ini (jangan kembalikan null begitu saja).
+      // null harus HANYA berarti "key ini memang belum ada", bukan "gagal
+      // mengambil data" — kalau dua kondisi ini dicampur, kode yang menyimpan
+      // ulang data bisa salah kira server kosong padahal cuma jaringan
+      // bermasalah sesaat, lalu menimpa data asli dengan data kosong/lama.
+      // Inilah akar penyebab data Target/Realisasi (dan lainnya) sempat
+      // hilang berulang kali secara acak.
+      throw e;
+    }
   }
   try{
     const r = await window.storage.get(key, true);
@@ -1180,11 +1194,19 @@ async function saveList(key, arr){
 /* Selalu ambil salinan TERBARU dari server sebelum menyimpan perubahan —
    supaya laporan yang baru saja dikirim karyawan lain (setelah kita memuat
    halaman) TIDAK tertimpa/hilang saat kita menyimpan. Ini memperbaiki bug
-   "data karyawan lain hilang setelah orang lain input". */
+   "data karyawan lain hilang setelah orang lain input".
+   Kalau proses ambil data terbaru GAGAL (jaringan bermasalah), seluruh proses
+   simpan DIBATALKAN (bukan diam-diam memakai salinan lama di memori lalu
+   menyimpannya) — supaya kegagalan jaringan sesaat tidak pernah bisa
+   menimpa/menghapus data yang sudah tersimpan di server. */
 async function mutateAndSave(key, stateProp, mutatorFn){
   let fresh;
-  try{ fresh = await loadList(key); }catch(e){ fresh = null; }
-  if(!Array.isArray(fresh)) fresh = Array.isArray(state[stateProp]) ? [...state[stateProp]] : [];
+  try{
+    fresh = await loadList(key);
+  }catch(e){
+    window.__storageErrors.push(String(e && e.message || e));
+    return false;
+  }
   mutatorFn(fresh);
   const ok = await saveList(key, fresh);
   if(ok) state[stateProp] = fresh;
@@ -3884,8 +3906,19 @@ function drawAdminNipList(){
 }
 /* Refetch config terbaru dari server sebelum mengubah, supaya perubahan Admin
    lain (mis. tambah karyawan) tidak tertimpa — sama seperti mutateAndSave. */
+/* Refetch config terbaru dari server sebelum mengubah, supaya perubahan Admin
+   lain (mis. tambah karyawan) tidak tertimpa — sama seperti mutateAndSave.
+   Kalau proses ambil data terbaru GAGAL (mis. jaringan bermasalah), seluruh
+   proses simpan DIBATALKAN sepenuhnya (bukan lanjut menyimpan data lama/
+   default) — supaya kegagalan jaringan sesaat tidak pernah bisa menghapus
+   data asli yang sudah tersimpan di server. */
 async function mutateConfigAndSave(mutatorFn){
-  await loadConfig();
+  try{
+    await loadConfig();
+  }catch(e){
+    window.__storageErrors.push(String(e && e.message || e));
+    return false;
+  }
   mutatorFn(CFG);
   const ok = await saveConfig();
   return ok;
@@ -4335,8 +4368,12 @@ for(let y=YEAR_MIN; y<=YEAR_MAX; y++){
 }
 async function onPeriodChange(){
   state.month = monthKeyOf(parseInt(yearSelect.value,10), parseInt(monthSelect.value,10));
-  await loadMonthData();
-  toast(`Menampilkan data ${monthLabel()}`, "🗓️");
+  try{
+    await loadMonthData();
+    toast(`Menampilkan data ${monthLabel()}`, "🗓️");
+  }catch(e){
+    toast("Gagal memuat data periode ini, coba lagi", "⚠️");
+  }
   document.getElementById("pdfMonthLabel").textContent = monthLabel();
   render();
 }

@@ -951,6 +951,9 @@ function defaultConfig(){
     pipelineYTDBase: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },   // dana di akhir tahun lalu
     pipelineYOYBase: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },   // dana di bulan sama, tahun lalu
     dashboardSectionOrder: ["kpi","teams","chart","top5","products"],
+    pipelineSectionOrder: ["filter","kpi","jenis","target","lapor","list"],
+    leaderboardSectionOrder: ["chips","list"],
+    layananSectionOrder: ["layananInput","layananLB","efisiensi","layananDetail","penilaianInput","penilaianLB","penilaianDetail"],
   };
 }
 let CFG = defaultConfig();
@@ -1955,13 +1958,21 @@ function renderMyReports(){
 
 /* ---------------- LEADERBOARD ---------------- */
 function renderLeaderboard(){
-  view.innerHTML = `
-    <h2 class="sec">Leaderboard Akuisisi <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">klik nama untuk lihat gap per produk</span></h2>
+  const sections = {
+    chips: `
     <div class="chip-row" id="lbChips">
       <div class="chip active" data-scope="all">🌐 Semua Karyawan</div>
       ${CFG.teams.map(t=>`<div class="chip" data-scope="${t}">${CFG.teamIcons[t]} ${t}</div>`).join("")}
-    </div>
-    <div class="card glow" id="lbBox"></div>
+    </div>`,
+    list: `
+    <div class="card glow" id="lbBox"></div>`,
+  };
+  const validOrder = ["chips","list"];
+  const order = (Array.isArray(CFG.leaderboardSectionOrder) && validOrder.every(k=>CFG.leaderboardSectionOrder.includes(k)))
+    ? CFG.leaderboardSectionOrder : validOrder;
+  view.innerHTML = `
+    <h2 class="sec">Leaderboard Akuisisi <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">klik nama untuk lihat gap per produk</span></h2>
+    ${order.map(k=>sections[k]||"").join("\n")}
   `;
   document.querySelectorAll("#lbChips .chip").forEach(c=>{
     c.onclick = ()=>{
@@ -1982,8 +1993,8 @@ function drawLB(scope){
 
 /* ---------------- LAYANAN NASABAH (Sheet 2) ---------------- */
 function renderLayanan(){
-  view.innerHTML = `
-    <h2 class="sec">Layanan Nasabah &mdash; CS &amp; Teller <span class="line"></span></h2>
+  const sections = {
+    layananInput: `
     <div class="grid cols-2">
       <div class="card glow">
         <div class="orb o-blue"></div>
@@ -2018,8 +2029,8 @@ function renderLayanan(){
         <h3 class="sub">Rata-rata Bulanan per Karyawan</h3>
         <div id="layananAvgBox"></div>
       </div>
-    </div>
-
+    </div>`,
+    layananLB: `
     <h2 class="sec">Leaderboard Layanan Nasabah <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">CS dan Teller ditampilkan terpisah</span></h2>
     <div class="grid cols-2">
       <div class="card glow">
@@ -2030,8 +2041,8 @@ function renderLayanan(){
         <h3 class="sub">🏦 Leaderboard Teller &mdash; Nasabah Dilayani</h3>
         <div id="layananLB_TELLER"></div>
       </div>
-    </div>
-
+    </div>`,
+    efisiensi: `
     <h2 class="sec">Leaderboard Efisiensi Layanan <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">semakin singkat waktu, semakin baik</span></h2>
     <div class="grid cols-2">
       <div class="card glow">
@@ -2042,13 +2053,11 @@ function renderLayanan(){
         <h3 class="sub">⚡ Rata-rata Waktu Transaksi Tercepat</h3>
         <div id="transLB"></div>
       </div>
-    </div>
-
-    ${state.role==="admin" ? `
+    </div>`,
+    layananDetail: state.role==="admin" ? `
     <h2 class="sec">Detail Input Layanan &mdash; ${monthLabel()} <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">Admin dapat mengedit / menghapus</span></h2>
-    <div class="card glow"><div id="layananDetail"></div></div>
-    ` : ``}
-
+    <div class="card glow"><div id="layananDetail"></div></div>` : ``,
+    penilaianInput: `
     <h2 class="sec">Support &mdash; Penilaian Kinerja Karyawan <span class="line"></span></h2>
     <p class="hint" style="margin-bottom:16px">Khusus untuk karyawan yang terdaftar di bawah ini (Admin, Kebersihan, Arsip, Mengemudi, Sortir Uang, Keamanan Kantor). Dinilai setiap hari oleh rekan kerja lain dengan skor 1&ndash;100, nama pelapor selalu tercatat, dan yang tertinggi tampil di leaderboard.</p>
     <div class="grid cols-2">
@@ -2094,14 +2103,22 @@ function renderLayanan(){
         <h3 class="sub">Rata-rata Penilaian per Karyawan</h3>
         <div id="penilaianAvgBox"></div>
       </div>
-    </div>
-
+    </div>`,
+    penilaianLB: `
     <h2 class="sec">Leaderboard Support <span class="line"></span></h2>
-    <div class="card glow" id="penilaianLB"></div>
-
+    <div class="card glow" id="penilaianLB"></div>`,
+    penilaianDetail: `
     <h2 class="sec">Detail Laporan Penilaian &mdash; ${monthLabel()} <span class="line"></span>${state.role==="admin" ? '<span style="font-size:11px;color:var(--ink-400);font-weight:600">Admin dapat mengedit / menghapus</span>':''}</h2>
-    <div class="card glow"><div id="penilaianDetail"></div></div>
+    <div class="card glow"><div id="penilaianDetail"></div></div>`,
+  };
+  const validLayananOrder = ["layananInput","layananLB","efisiensi","layananDetail","penilaianInput","penilaianLB","penilaianDetail"];
+  const layananOrder = (Array.isArray(CFG.layananSectionOrder) && validLayananOrder.every(k=>CFG.layananSectionOrder.includes(k)))
+    ? CFG.layananSectionOrder : validLayananOrder;
+  view.innerHTML = `
+    <h2 class="sec">Layanan Nasabah &mdash; CS &amp; Teller <span class="line"></span></h2>
+    ${layananOrder.map(k=>sections[k]||"").join("\n")}
   `;
+
   document.getElementById("layananForm").onsubmit = async(e)=>{
     e.preventDefault();
     const employee = document.getElementById("l_employee").value;
@@ -2568,9 +2585,8 @@ function fmtJuta(n){ return `Rp ${Number(n||0).toLocaleString('id-ID')} jt`; }
 function renderPipeline(){
   const isAdmin = state.role === "admin";
 
-  view.innerHTML = `
-    <h2 class="sec">Pipeline Dana <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">dilaporkan oleh semua karyawan</span></h2>
-
+  const sections = {
+    filter: `
     <div class="card glow" style="margin-bottom:18px">
       <h3 class="sub">🔎 Filter Dashboard <span style="color:var(--ink-400);font-weight:600;font-size:11px">berlaku untuk seluruh ringkasan &amp; daftar di bawah</span></h3>
       <div class="grid cols-4" style="gap:12px">
@@ -2592,17 +2608,16 @@ function renderPipeline(){
         <div class="field" style="margin:0"><label>Tanggal Komitmen — Sampai</label><input type="date" id="flt_sampai"></div>
       </div>
       <button class="btn ghost sm" id="fltResetBtn" style="margin-top:12px">↺ Reset Semua Filter</button>
-    </div>
-
-    <div class="grid cols-4" id="pipelineKpiCards"></div>
-
+    </div>`,
+    kpi: `
+    <div class="grid cols-4" id="pipelineKpiCards"></div>`,
+    jenis: `
     <h2 class="sec">Potensi, Realisasi &amp; Pipeline per Jenis Rekening <span class="line"></span></h2>
-    <div class="grid cols-3" id="pipelineJenisCards"></div>
-
-    ${isAdmin ? `
+    <div class="grid cols-3" id="pipelineJenisCards"></div>`,
+    target: isAdmin ? `
     <h2 class="sec">🎯 Target, Realisasi &amp; Pembanding (khusus Admin) <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">Gap = (Realisasi + Total Potensi) &minus; Target</span></h2>
     <div class="card glow" style="margin-bottom:8px">
-      <p class="hint" style="margin-bottom:16px">MTD = Realisasi &minus; dana bulan lalu. YTD = Realisasi &minus; dana akhir tahun lalu. YOY = Realisasi &minus; dana bulan yang sama tahun lalu.</p>
+      <p class="hint" style="margin-bottom:16px">Gap, MTD, YTD, YOY semua dihitung dari basis yang sama: <b>Realisasi + Total Potensi</b>. Gap = itu &minus; Target. MTD = itu &minus; dana bulan lalu. YTD = itu &minus; dana akhir tahun lalu. YOY = itu &minus; dana bulan yang sama tahun lalu.</p>
       <div class="grid cols-3" style="gap:14px">
         ${PIPELINE_JENIS.map(j=>`
           <div>
@@ -2616,9 +2631,8 @@ function renderPipeline(){
         `).join("")}
       </div>
       <button class="btn primary" id="pipelineTargetSaveBtn" style="margin-top:6px">💾 Simpan Semua</button>
-    </div>
-    ` : ``}
-
+    </div>` : ``,
+    lapor: `
     <h2 class="sec">📝 Lapor Komitmen Baru <span class="line"></span></h2>
     <div class="card glow" style="margin-bottom:24px">
       <form id="pipelineForm">
@@ -2651,8 +2665,8 @@ function renderPipeline(){
         </div>
         <button type="submit" class="btn primary">🚀 Kirim Laporan Pipeline</button>
       </form>
-    </div>
-
+    </div>`,
+    list: `
     <h2 class="sec">Daftar Pipeline <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600" id="pipelineListCount"></span></h2>
     <div class="card glow" style="margin-bottom:16px">
       <div class="card kpi" style="padding:12px;margin-bottom:14px;display:inline-block;min-width:260px">
@@ -2664,7 +2678,15 @@ function renderPipeline(){
         <button class="btn primary" id="pipelineExportBtn">📊 Unduh Excel</button>
       </div>
       <div id="pipelineList" style="max-height:520px;overflow:auto"></div>
-    </div>
+    </div>`,
+  };
+  const validPipelineOrder = ["filter","kpi","jenis","target","lapor","list"];
+  const pipelineOrder = (Array.isArray(CFG.pipelineSectionOrder) && validPipelineOrder.every(k=>CFG.pipelineSectionOrder.includes(k)))
+    ? CFG.pipelineSectionOrder : validPipelineOrder;
+
+  view.innerHTML = `
+    <h2 class="sec">Pipeline Dana <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">dilaporkan oleh semua karyawan</span></h2>
+    ${pipelineOrder.map(k=>sections[k]||"").join("\n")}
   `;
 
   ["flt_pic","flt_jenis","flt_sumber","flt_status","flt_dari","flt_sampai"].forEach(id=>{
@@ -2801,14 +2823,57 @@ function pipelineGroupStats(entries, jenisList){
   const mtdBase = jenisList.reduce((s,j)=>s+(CFG.pipelineMTDBase[j]||0),0);
   const ytdBase = jenisList.reduce((s,j)=>s+(CFG.pipelineYTDBase[j]||0),0);
   const yoyBase = jenisList.reduce((s,j)=>s+(CFG.pipelineYOYBase[j]||0),0);
-  const gap = (realisasi + potensi) - target;
-  const mtd = realisasi - mtdBase;
-  const ytd = realisasi - ytdBase;
-  const yoy = realisasi - yoyBase;
-  return {potensi, pipelineTotal, target, realisasi, gap, mtdBase, ytdBase, yoyBase, mtd, ytd, yoy};
+  const combined = realisasi + potensi; // Realisasi + Total Potensi
+
+  // SKEMA 1 — LAPORAN REALITA: murni dari Realisasi saja (tanpa potensi).
+  const realita = {
+    gap: realisasi - target,
+    mtd: realisasi - mtdBase,
+    ytd: realisasi - ytdBase,
+    yoy: realisasi - yoyBase,
+    pct: target>0 ? realisasi/target*100 : 0,
+  };
+  // SKEMA 2 — LAPORAN ASUMSI: dari Realisasi + Total Potensi (potensi ikut dihitung).
+  const komitmen = {
+    gap: combined - target,
+    mtd: combined - mtdBase,
+    ytd: combined - ytdBase,
+    yoy: combined - yoyBase,
+    pct: target>0 ? combined/target*100 : 0,
+  };
+
+  return {potensi, pipelineTotal, target, realisasi, combined, mtdBase, ytdBase, yoyBase, realita, komitmen,
+    // alias lama (dipakai kode lain seperti Excel ringkasan lama) -> mengikuti skema Komitmen
+    gap: komitmen.gap, mtd: komitmen.mtd, ytd: komitmen.ytd, yoy: komitmen.yoy};
+}
+function pipelineSchemeBlockHTML(title, subtitle, icon, sch, target, badgeCls){
+  return `
+    <div style="margin-top:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06)">
+      <div style="font-size:10.5px;font-weight:800;color:${badgeCls};margin-bottom:2px">${icon} ${title}</div>
+      <div class="hint" style="font-size:9px;margin-bottom:8px">${subtitle}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
+        <div style="text-align:center">
+          <div style="font-size:9px;color:var(--ink-400);font-weight:700">MTD</div>
+          <div style="font-size:11px;font-weight:800;color:${sch.mtd>=0?'var(--ok)':'var(--danger)'}">${sch.mtd>=0?'+':''}${fmtJuta(sch.mtd)}</div>
+        </div>
+        <div style="text-align:center;border-left:1px solid rgba(255,255,255,0.08);border-right:1px solid rgba(255,255,255,0.08)">
+          <div style="font-size:9px;color:var(--ink-400);font-weight:700">YTD</div>
+          <div style="font-size:11px;font-weight:800;color:${sch.ytd>=0?'var(--ok)':'var(--danger)'}">${sch.ytd>=0?'+':''}${fmtJuta(sch.ytd)}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:9px;color:var(--ink-400);font-weight:700">YOY</div>
+          <div style="font-size:11px;font-weight:800;color:${sch.yoy>=0?'var(--ok)':'var(--danger)'}">${sch.yoy>=0?'+':''}${fmtJuta(sch.yoy)}</div>
+        </div>
+      </div>
+      ${target>0 ? `
+      <div style="text-align:center">
+        <span class="badge ${sch.gap>=0?'ok':'danger'}" style="font-size:9.5px">Gap: ${sch.gap>=0?'+':''}${fmtJuta(sch.gap)}</span>
+        ${(()=>{ const d = pipelineAchievementDot(sch.pct); return `<div style="margin-top:6px;font-size:11.5px;font-weight:800;color:${d.color}">${d.dot} ${sch.pct.toFixed(1)}% dari target</div>`; })()}
+      </div>` : `<div class="hint" style="font-size:10px;text-align:center">Target belum diatur</div>`}
+    </div>`;
 }
 function pipelineCardHTML(label, icon, stats, isAdmin, isAggregate){
-  const {potensi, pipelineTotal, target, realisasi, gap, mtd, ytd, yoy} = stats;
+  const {potensi, pipelineTotal, target, realisasi, combined, realita, komitmen} = stats;
   return `
     <div class="card glow${isAggregate?' pipeline-agg-card':''}">
       <div class="orb o-gold"></div>
@@ -2825,32 +2890,21 @@ function pipelineCardHTML(label, icon, stats, isAdmin, isAggregate){
         <span style="font-size:11.5px;color:var(--ink-400)">Realisasi</span>
         <b>${fmtJuta(realisasi)}</b>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin:10px 0;padding:8px;background:rgba(255,255,255,0.03);border-radius:10px">
-        <div style="text-align:center">
-          <div style="font-size:9.5px;color:var(--ink-400);font-weight:700">MTD</div>
-          <div style="font-size:11.5px;font-weight:800;color:${mtd>=0?'var(--ok)':'var(--danger)'}">${mtd>=0?'+':''}${fmtJuta(mtd)}</div>
-        </div>
-        <div style="text-align:center;border-left:1px solid rgba(255,255,255,0.08);border-right:1px solid rgba(255,255,255,0.08)">
-          <div style="font-size:9.5px;color:var(--ink-400);font-weight:700">YTD</div>
-          <div style="font-size:11.5px;font-weight:800;color:${ytd>=0?'var(--ok)':'var(--danger)'}">${ytd>=0?'+':''}${fmtJuta(ytd)}</div>
-        </div>
-        <div style="text-align:center">
-          <div style="font-size:9.5px;color:var(--ink-400);font-weight:700">YOY</div>
-          <div style="font-size:11.5px;font-weight:800;color:${yoy>=0?'var(--ok)':'var(--danger)'}">${yoy>=0?'+':''}${fmtJuta(yoy)}</div>
-        </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px;padding-top:6px;border-top:1px dashed rgba(255,255,255,0.12)">
+        <span style="font-size:11.5px;color:var(--ink-200);font-weight:700">Realisasi + Potensi</span>
+        <b style="color:#fff">${fmtJuta(combined)}</b>
       </div>
       ${isAdmin || target>0 ? `
-      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:2px">
         <span style="font-size:11.5px;color:var(--ink-400)">Target</span>
         <b>${fmtJuta(target)}</b>
       </div>
-      <div class="bar-track" style="margin:8px 0"><div class="bar-fill ${gap>=0?'ok':'danger'}" style="width:${target>0?Math.min((realisasi+potensi)/target*100,100):0}%"></div></div>
-      <div style="text-align:center">
-        <span class="badge ${gap>=0?'ok':'danger'}">Gap: ${gap>=0?'+':''}${fmtJuta(gap)}</span>
-        ${target>0 ? (()=>{ const pct = (realisasi+potensi)/target*100; const d = pipelineAchievementDot(pct); return `<div style="margin-top:8px;font-size:13px;font-weight:800;color:${d.color}">${d.dot} ${pct.toFixed(1)}% dari target</div>`; })() : ``}
-      </div>` : `<div class="hint" style="font-size:11px">Target belum diatur Admin</div>`}
+      ${pipelineSchemeBlockHTML("Laporan Realita", "Dari Realisasi saja (tanpa potensi)", "📊", realita, target, "var(--ink-200)")}
+      ${pipelineSchemeBlockHTML("Laporan Komitmen", "Dari Realisasi + Total Potensi", "🔮", komitmen, target, "var(--gold-300)")}
+      ` : `<div class="hint" style="font-size:11px">Target belum diatur Admin</div>`}
     </div>`;
 }
+
 function drawPipelineJenisCards(filtered, f){
   const box = document.getElementById("pipelineJenisCards");
   if(!box) return;
@@ -3056,27 +3110,34 @@ async function downloadPipelineExcel(){
       ["Tabungan", ["Tabungan"]], ["Giro", ["Giro"]], ["Deposito", ["Deposito"]],
       ["CASA (Tabungan+Giro)", ["Tabungan","Giro"]], ["DPK (Tab.+Giro+Deposito)", ["Tabungan","Giro","Deposito"]],
     ];
-    const summaryRows = plExcelGroups.map(([label, jenisList])=>{
-      const st = pipelineGroupStats(filtered, jenisList);
-      const pct = st.target>0 ? (st.realisasi+st.potensi)/st.target*100 : 0;
-      const statusLabel = pct < 95 ? "Merah (<95%)" : pct <= 100 ? "Kuning (95-100%)" : "Hijau (>100%)";
-      return {
-        "Jenis Rekening": label,
-        "Total Potensi (juta)": st.potensi,
-        "Total Pipeline (juta)": st.pipelineTotal,
-        "Realisasi (juta)": st.realisasi,
-        "Target (juta)": st.target,
-        "Gap (juta)": st.gap,
-        "MTD (juta)": st.mtd,
-        "YTD (juta)": st.ytd,
-        "YOY (juta)": st.yoy,
-        "Pencapaian (%)": st.target>0 ? Number(pct.toFixed(1)) : 0,
-        "Status": st.target>0 ? statusLabel : "Target belum diatur",
-      };
-    });
-    const wsSum = XLSX.utils.json_to_sheet(summaryRows);
-    wsSum['!cols'] = [24,16,16,14,12,12,12,12,12,14,20].map(w=>({wch:w}));
-    XLSX.utils.book_append_sheet(wb, wsSum, "Ringkasan per Jenis");
+    function statusLabelFor(pct){ return pct < 95 ? "Merah (<95%)" : pct <= 100 ? "Kuning (95-100%)" : "Hijau (>100%)"; }
+    function buildSchemeRows(schemeKey){
+      return plExcelGroups.map(([label, jenisList])=>{
+        const st = pipelineGroupStats(filtered, jenisList);
+        const sch = st[schemeKey];
+        return {
+          "Jenis Rekening": label,
+          "Total Potensi (juta)": st.potensi,
+          "Total Pipeline (juta)": st.pipelineTotal,
+          "Realisasi (juta)": st.realisasi,
+          "Realisasi + Potensi (juta)": st.combined,
+          "Target (juta)": st.target,
+          "Gap (juta)": sch.gap,
+          "MTD (juta)": sch.mtd,
+          "YTD (juta)": sch.ytd,
+          "YOY (juta)": sch.yoy,
+          "Pencapaian (%)": st.target>0 ? Number(sch.pct.toFixed(1)) : 0,
+          "Status": st.target>0 ? statusLabelFor(sch.pct) : "Target belum diatur",
+        };
+      });
+    }
+    const wsRealita = XLSX.utils.json_to_sheet(buildSchemeRows("realita"));
+    wsRealita['!cols'] = [24,16,16,14,20,12,12,12,12,12,14,20].map(w=>({wch:w}));
+    XLSX.utils.book_append_sheet(wb, wsRealita, "Laporan Realita");
+
+    const wsKomitmen = XLSX.utils.json_to_sheet(buildSchemeRows("komitmen"));
+    wsKomitmen['!cols'] = [24,16,16,14,20,12,12,12,12,12,14,20].map(w=>({wch:w}));
+    XLSX.utils.book_append_sheet(wb, wsKomitmen, "Laporan Komitmen");
 
     XLSX.writeFile(wb, `Pipeline_Dana_${new Date().toISOString().slice(0,10)}.xlsx`);
     toast("File Excel berhasil diunduh", "📊");
@@ -3487,6 +3548,27 @@ function renderAdmin(){
       <div id="dashLayoutList"></div>
     </div>
 
+    <div class="card glow" style="margin-bottom:18px">
+      <div class="orb o-gold"></div>
+      <h3 class="sub">📐 Susun Tata Letak Pipeline Dana</h3>
+      <p class="hint" style="margin-bottom:14px">Atur urutan bagian yang tampil di halaman Pipeline Dana — berlaku untuk semua orang yang membuka aplikasi.</p>
+      <div id="pipelineLayoutList"></div>
+    </div>
+
+    <div class="card glow" style="margin-bottom:18px">
+      <div class="orb o-blue"></div>
+      <h3 class="sub">📐 Susun Tata Letak Leaderboard</h3>
+      <p class="hint" style="margin-bottom:14px">Atur urutan bagian yang tampil di halaman Leaderboard — berlaku untuk semua orang yang membuka aplikasi.</p>
+      <div id="leaderboardLayoutList"></div>
+    </div>
+
+    <div class="card glow" style="margin-bottom:18px">
+      <div class="orb o-gold"></div>
+      <h3 class="sub">📐 Susun Tata Letak Layanan &amp; Support</h3>
+      <p class="hint" style="margin-bottom:14px">Atur urutan bagian yang tampil di halaman Layanan &amp; Support — berlaku untuk semua orang yang membuka aplikasi.</p>
+      <div id="layananLayoutList"></div>
+    </div>
+
     <div class="card glow" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div>
         <h3 class="sub" style="margin:0">Tarik Data Akuisisi</h3>
@@ -3510,6 +3592,9 @@ function renderAdmin(){
   drawProdMgmtList();
   drawTeamMgmtList();
   drawDashLayoutList();
+  drawPipelineLayoutList();
+  drawLeaderboardLayoutList();
+  drawLayananLayoutList();
   wireMasterDataForms();
   document.getElementById("addAdminForm").onsubmit = async (e)=>{
     e.preventDefault();
@@ -3721,44 +3806,85 @@ function drawTeamMgmtList(){
   });
 }
 
-/* ---- Kelola Tata Letak Dashboard ---- */
-const DASH_SECTION_LABELS = {
-  kpi: "📊 Ringkasan Cabang (kartu KPI)",
-  teams: "👥 Pencapaian per Tim",
-  chart: "📈 Grafik Interaktif Tim",
-  top5: "🏆 Top 5 Karyawan",
-  products: "📦 Akuisisi per Produk",
+/* ---- Kelola Tata Letak Halaman (generik — dipakai untuk Dashboard, Pipeline Dana, dst.) ---- */
+const SECTION_LABELS = {
+  dashboard: {
+    kpi: "📊 Ringkasan Cabang (kartu KPI)",
+    teams: "👥 Pencapaian per Tim",
+    chart: "📈 Grafik Interaktif Tim",
+    top5: "🏆 Top 5 Karyawan",
+    products: "📦 Akuisisi per Produk",
+  },
+  pipeline: {
+    filter: "🔎 Filter Dashboard",
+    kpi: "📊 Kartu Ringkasan",
+    jenis: "💰 Kartu per Jenis Rekening",
+    target: "🎯 Target, Realisasi & Pembanding",
+    lapor: "📝 Form Lapor Komitmen Baru",
+    list: "📋 Daftar Pipeline",
+  },
+  leaderboard: {
+    chips: "🏷️ Filter Tim (chip)",
+    list: "🏆 Daftar Leaderboard",
+  },
+  layanan: {
+    layananInput: "📝 Input Harian + Rata-rata Bulanan",
+    layananLB: "🎧 Leaderboard Layanan (CS & Teller)",
+    efisiensi: "⏱️ Leaderboard Efisiensi (Antrian/Transaksi)",
+    layananDetail: "📋 Detail Input Layanan (Admin)",
+    penilaianInput: "💬 Form Penilaian + Rata-rata",
+    penilaianLB: "🥇 Leaderboard Support",
+    penilaianDetail: "📋 Detail Laporan Penilaian",
+  },
 };
-function drawDashLayoutList(){
-  const box = document.getElementById("dashLayoutList");
+const SECTION_ORDER_DEFAULTS = {
+  dashboard: ["kpi","teams","chart","top5","products"],
+  pipeline: ["filter","kpi","jenis","target","lapor","list"],
+  leaderboard: ["chips","list"],
+  layanan: ["layananInput","layananLB","efisiensi","layananDetail","penilaianInput","penilaianLB","penilaianDetail"],
+};
+const SECTION_ORDER_CFG_KEY = {
+  dashboard: "dashboardSectionOrder",
+  pipeline: "pipelineSectionOrder",
+  leaderboard: "leaderboardSectionOrder",
+  layanan: "layananSectionOrder",
+};
+function drawLayoutList(pageKey, boxId){
+  const box = document.getElementById(boxId);
   if(!box) return;
-  const order = (Array.isArray(CFG.dashboardSectionOrder) && CFG.dashboardSectionOrder.length===5)
-    ? CFG.dashboardSectionOrder : ["kpi","teams","chart","top5","products"];
+  const cfgKey = SECTION_ORDER_CFG_KEY[pageKey];
+  const defaults = SECTION_ORDER_DEFAULTS[pageKey];
+  const labels = SECTION_LABELS[pageKey];
+  const order = (Array.isArray(CFG[cfgKey]) && CFG[cfgKey].length===defaults.length)
+    ? CFG[cfgKey] : defaults;
   box.innerHTML = order.map((k,i)=>`
     <div class="lb-row" style="padding:9px 12px">
-      <div style="flex:1;font-weight:700">${i+1}. ${DASH_SECTION_LABELS[k]||k}</div>
-      <button class="btn ghost sm" data-dash-up="${k}" ${i===0?'disabled':''}>⬆️</button>
-      <button class="btn ghost sm" data-dash-down="${k}" ${i===order.length-1?'disabled':''}>⬇️</button>
+      <div style="flex:1;font-weight:700">${i+1}. ${labels[k]||k}</div>
+      <button class="btn ghost sm" data-layout-up="${k}" ${i===0?'disabled':''}>⬆️</button>
+      <button class="btn ghost sm" data-layout-down="${k}" ${i===order.length-1?'disabled':''}>⬇️</button>
     </div>
   `).join("");
   async function moveSection(key, dir){
     const ok = await mutateConfigAndSave((cfg)=>{
-      let cur = (Array.isArray(cfg.dashboardSectionOrder) && cfg.dashboardSectionOrder.length===5)
-        ? [...cfg.dashboardSectionOrder] : ["kpi","teams","chart","top5","products"];
+      let cur = (Array.isArray(cfg[cfgKey]) && cfg[cfgKey].length===defaults.length) ? [...cfg[cfgKey]] : [...defaults];
       const idx = cur.indexOf(key);
       const swapWith = idx + dir;
       if(idx<0 || swapWith<0 || swapWith>=cur.length) return;
       [cur[idx], cur[swapWith]] = [cur[swapWith], cur[idx]];
-      cfg.dashboardSectionOrder = cur;
+      cfg[cfgKey] = cur;
     });
     if(!ok){ toast("Gagal menyimpan, coba lagi", "⚠️"); return; }
-    toast("Urutan dashboard diperbarui", "✅");
+    toast("Urutan halaman diperbarui", "✅");
     playSound("click");
-    if(state.tab === "admin") drawDashLayoutList();
+    if(state.tab === "admin") drawLayoutList(pageKey, boxId);
   }
-  box.querySelectorAll("[data-dash-up]").forEach(b=>b.onclick=()=>moveSection(b.dataset.dashUp, -1));
-  box.querySelectorAll("[data-dash-down]").forEach(b=>b.onclick=()=>moveSection(b.dataset.dashDown, 1));
+  box.querySelectorAll("[data-layout-up]").forEach(b=>b.onclick=()=>moveSection(b.dataset.layoutUp, -1));
+  box.querySelectorAll("[data-layout-down]").forEach(b=>b.onclick=()=>moveSection(b.dataset.layoutDown, 1));
 }
+function drawDashLayoutList(){ drawLayoutList("dashboard", "dashLayoutList"); }
+function drawPipelineLayoutList(){ drawLayoutList("pipeline", "pipelineLayoutList"); }
+function drawLeaderboardLayoutList(){ drawLayoutList("leaderboard", "leaderboardLayoutList"); }
+function drawLayananLayoutList(){ drawLayoutList("layanan", "layananLayoutList"); }
 
 /* ---- Form-form Tambah (Karyawan/Produk/Tim/Branding) ---- */
 function wireMasterDataForms(){
@@ -4265,16 +4391,25 @@ function pdfPipelineDetail(){
   p.newPage("Detail Pipeline Dana");
   p.paragraph(`Total Pipeline: ${fmtJuta(pipelineTotalPipeline(filtered))}   |   Total Potensi: ${fmtJuta(pipelineTotalPotensi(filtered))}   |   ${filtered.length} entri`, {bold:true});
   p.setY(p.getY()+8);
-  p.sectionTitle("Ringkasan per Jenis Rekening (+ CASA & DPK)");
-  const sumCols = [{label:"JENIS",w:85},{label:"POTENSI",w:56,align:"right"},{label:"PIPELINE",w:56,align:"right"},{label:"REALISASI",w:56,align:"right"},{label:"TARGET",w:50,align:"right"},{label:"GAP",w:50,align:"right"},{label:"MTD",w:47,align:"right"},{label:"YTD",w:47,align:"right"},{label:"YOY",w:47,align:"right"}];
-  p.tableHeader(sumCols);
   const groups = [
     ["Tabungan", ["Tabungan"]], ["Giro", ["Giro"]], ["Deposito", ["Deposito"]],
     ["CASA", ["Tabungan","Giro"]], ["DPK", ["Tabungan","Giro","Deposito"]],
   ];
+  const sumCols = [{label:"JENIS",w:85},{label:"POTENSI",w:56,align:"right"},{label:"PIPELINE",w:56,align:"right"},{label:"REALISASI",w:56,align:"right"},{label:"TARGET",w:50,align:"right"},{label:"GAP",w:50,align:"right"},{label:"MTD",w:47,align:"right"},{label:"YTD",w:47,align:"right"},{label:"YOY",w:47,align:"right"}];
+  p.sectionTitle("📊 Laporan Realita — dari Realisasi saja (+ CASA & DPK)");
+  p.tableHeader(sumCols);
   groups.forEach(([label, jenisList], i)=>{
     const st = pipelineGroupStats(filtered, jenisList);
-    p.tableRow(sumCols, [label, fmtJuta(st.potensi), fmtJuta(st.pipelineTotal), fmtJuta(st.realisasi), fmtJuta(st.target), (st.gap>=0?'+':'')+fmtJuta(st.gap), (st.mtd>=0?'+':'')+fmtJuta(st.mtd), (st.ytd>=0?'+':'')+fmtJuta(st.ytd), (st.yoy>=0?'+':'')+fmtJuta(st.yoy)], {zebra:i%2===0, color: st.gap<0?[194,58,58]:[40,40,40]});
+    const sch = st.realita;
+    p.tableRow(sumCols, [label, fmtJuta(st.potensi), fmtJuta(st.pipelineTotal), fmtJuta(st.realisasi), fmtJuta(st.target), (sch.gap>=0?'+':'')+fmtJuta(sch.gap), (sch.mtd>=0?'+':'')+fmtJuta(sch.mtd), (sch.ytd>=0?'+':'')+fmtJuta(sch.ytd), (sch.yoy>=0?'+':'')+fmtJuta(sch.yoy)], {zebra:i%2===0, color: sch.gap<0?[194,58,58]:[40,40,40]});
+  });
+  p.setY(p.getY()+10);
+  p.sectionTitle("🔮 Laporan Komitmen — dari Realisasi + Total Potensi (+ CASA & DPK)");
+  p.tableHeader(sumCols);
+  groups.forEach(([label, jenisList], i)=>{
+    const st = pipelineGroupStats(filtered, jenisList);
+    const sch = st.komitmen;
+    p.tableRow(sumCols, [label, fmtJuta(st.potensi), fmtJuta(st.pipelineTotal), fmtJuta(st.realisasi), fmtJuta(st.target), (sch.gap>=0?'+':'')+fmtJuta(sch.gap), (sch.mtd>=0?'+':'')+fmtJuta(sch.mtd), (sch.ytd>=0?'+':'')+fmtJuta(sch.ytd), (sch.yoy>=0?'+':'')+fmtJuta(sch.yoy)], {zebra:i%2===0, color: sch.gap<0?[194,58,58]:[40,40,40]});
   });
   p.setY(p.getY()+10);
   p.sectionTitle(`Daftar Entri Pipeline (sesuai filter aktif — ${filtered.length} entri)`);
@@ -4498,16 +4633,25 @@ async function downloadSummaryPDF(){
 
     // ===== HALAMAN: PIPELINE DANA (Tabungan, Giro, Deposito, CASA, DPK) =====
     newPage("Pipeline Dana — Tabungan, Giro, Deposito, CASA & DPK");
-    sectionTitle("Ringkasan per Jenis Rekening");
     const plCols = [{label:"JENIS",w:90},{label:"POTENSI",w:58,align:"right"},{label:"PIPELINE",w:58,align:"right"},{label:"REALISASI",w:58,align:"right"},{label:"TARGET",w:52,align:"right"},{label:"GAP",w:52,align:"right"},{label:"MTD",w:49,align:"right"},{label:"YTD",w:49,align:"right"},{label:"YOY",w:49,align:"right"}];
-    tableHeader(plCols);
     const plGroups = [
       ["Tabungan", ["Tabungan"]], ["Giro", ["Giro"]], ["Deposito", ["Deposito"]],
       ["CASA (Tabungan+Giro)", ["Tabungan","Giro"]], ["DPK (Tab.+Giro+Deposito)", ["Tabungan","Giro","Deposito"]],
     ];
+    sectionTitle("📊 Laporan Realita — dari Realisasi saja");
+    tableHeader(plCols);
     plGroups.forEach(([label, jenisList], i)=>{
       const st = pipelineGroupStats(state.pipeline, jenisList);
-      tableRow(plCols, [label, fmtJuta(st.potensi), fmtJuta(st.pipelineTotal), fmtJuta(st.realisasi), fmtJuta(st.target), (st.gap>=0?'+':'')+fmtJuta(st.gap), (st.mtd>=0?'+':'')+fmtJuta(st.mtd), (st.ytd>=0?'+':'')+fmtJuta(st.ytd), (st.yoy>=0?'+':'')+fmtJuta(st.yoy)], {zebra:i%2===0, color: st.gap<0?[194,58,58]:[40,40,40]});
+      const sch = st.realita;
+      tableRow(plCols, [label, fmtJuta(st.potensi), fmtJuta(st.pipelineTotal), fmtJuta(st.realisasi), fmtJuta(st.target), (sch.gap>=0?'+':'')+fmtJuta(sch.gap), (sch.mtd>=0?'+':'')+fmtJuta(sch.mtd), (sch.ytd>=0?'+':'')+fmtJuta(sch.ytd), (sch.yoy>=0?'+':'')+fmtJuta(sch.yoy)], {zebra:i%2===0, color: sch.gap<0?[194,58,58]:[40,40,40]});
+    });
+    y += 10;
+    sectionTitle("🔮 Laporan Komitmen — dari Realisasi + Total Potensi");
+    tableHeader(plCols);
+    plGroups.forEach(([label, jenisList], i)=>{
+      const st = pipelineGroupStats(state.pipeline, jenisList);
+      const sch = st.komitmen;
+      tableRow(plCols, [label, fmtJuta(st.potensi), fmtJuta(st.pipelineTotal), fmtJuta(st.realisasi), fmtJuta(st.target), (sch.gap>=0?'+':'')+fmtJuta(sch.gap), (sch.mtd>=0?'+':'')+fmtJuta(sch.mtd), (sch.ytd>=0?'+':'')+fmtJuta(sch.ytd), (sch.yoy>=0?'+':'')+fmtJuta(sch.yoy)], {zebra:i%2===0, color: sch.gap<0?[194,58,58]:[40,40,40]});
     });
     y += 10;
 

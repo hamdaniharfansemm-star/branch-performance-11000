@@ -30,7 +30,7 @@
   --ok:#3ee08e;
   --warn:#ffb84f;
   --glass: rgba(15,29,56,0.62);
-  --glass-brd: rgba(62,230,242,0.16);
+  --glass-brd: rgba(210,222,238,0.16);
   --radius:18px;
   --ff-display: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --ff-body: 'Manrope', 'Segoe UI', system-ui, sans-serif;
@@ -125,13 +125,12 @@ nav.tabs{
   display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 22px;padding:6px 2px 12px;
 }
 nav.tabs button{
-  flex:0 0 auto;padding:12px 19px 11px;border-radius:14px;border:1px solid rgba(255,255,255,0.10);
+  flex:0 0 auto;padding:12px 19px 11px;border-radius:14px;border:1px solid rgba(200,215,235,0.22);
   background:linear-gradient(160deg, var(--navy-700), var(--navy-900));
   color:var(--ink-200);font-weight:800;font-size:13px;letter-spacing:0.3px;
-  cursor:pointer;transition:transform .22s, color .22s, box-shadow .22s;white-space:nowrap;
+  cursor:pointer;transition:transform .18s, color .18s, box-shadow .18s, border-color .18s;white-space:nowrap;
   display:flex;align-items:center;gap:8px;position:relative;overflow:hidden;
-  box-shadow:0 6px 0 rgba(2,6,14,0.55), 0 10px 18px -6px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08),
-    inset 0 -3px 0 var(--tab-accent, rgba(244,201,93,0.5));
+  box-shadow:0 6px 0 rgba(2,6,14,0.55), 0 10px 18px -6px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06);
   transform:translateY(0);
 }
 nav.tabs button::before{
@@ -143,30 +142,17 @@ nav.tabs button::before{
 }
 nav.tabs button:hover::before{ opacity:1; animation:navSheen 1.1s ease-in-out; }
 @keyframes navSheen{0%{left:-60%;}100%{left:130%;}}
-nav.tabs button:hover{transform:translateY(-2px);color:#fff;}
+nav.tabs button:hover{transform:translateY(-2px);color:#fff;border-color:rgba(62,230,242,0.45);box-shadow:0 6px 0 rgba(2,6,14,0.55), 0 10px 18px -6px rgba(0,0,0,0.55), 0 0 18px -4px rgba(62,230,242,0.35), inset 0 1px 0 rgba(255,255,255,0.06);}
 nav.tabs button:active{transform:translateY(3px);box-shadow:0 2px 0 rgba(2,6,14,0.55), 0 4px 10px -4px rgba(0,0,0,0.5);}
-nav.tabs button[data-tab="dashboard"]{--tab-accent:rgba(244,201,93,0.65);}
-nav.tabs button[data-tab="lapor"]{--tab-accent:rgba(79,143,239,0.65);}
-nav.tabs button[data-tab="leaderboard"]{--tab-accent:rgba(244,201,93,0.85);background:linear-gradient(160deg, #2a2410, var(--navy-900));}
-nav.tabs button[data-tab="layanan"]{--tab-accent:rgba(62,224,142,0.6);}
-nav.tabs button[data-tab="riwayat"]{--tab-accent:rgba(159,177,224,0.6);}
-nav.tabs button[data-tab="admin"]{--tab-accent:rgba(244,201,93,0.7);}
-nav.tabs button[data-tab="info"]{--tab-accent:rgba(79,199,143,0.75);background:linear-gradient(160deg, #123625, var(--navy-900));}
-nav.tabs button[data-tab="info"].active{background:linear-gradient(160deg, #59d69a, #147a4c);color:#04241a;}
-nav.tabs button[data-tab="leads"]{--tab-accent:rgba(244,201,93,0.6);}
-nav.tabs button[data-tab="leads"].active{background:linear-gradient(160deg, #ffd98a, #d98c1f);color:#2a1600;}
-nav.tabs button[data-tab="pipeline"]{--tab-accent:rgba(62,224,142,0.65);}
-nav.tabs button[data-tab="pipeline"].active{background:linear-gradient(160deg, #9be8c2, #1c9f63);color:#04241a;}
+/* Menu satu warna saja: setiap tab TIDAK lagi punya warna berbeda-beda —
+   yang aktif menyala dengan kilau cyan (seperti lampu), meniru gaya
+   tombol pil bercahaya pada referensi desain. */
 nav.tabs button.active{
-  color:#241a02;
-  box-shadow:0 6px 0 rgba(150,105,10,0.65), 0 14px 26px -8px rgba(244,201,93,0.55), inset 0 1px 0 rgba(255,255,255,0.35);
+  color:#eafcff;
+  border-color:rgba(62,230,242,0.85);
+  background:linear-gradient(160deg, #123a4a, #0a1f2c);
+  box-shadow:0 0 0 1px rgba(62,230,242,0.5), 0 0 22px rgba(62,230,242,0.55), 0 0 46px -6px rgba(62,230,242,0.35), inset 0 1px 0 rgba(255,255,255,0.12);
 }
-nav.tabs button[data-tab="dashboard"].active{background:linear-gradient(160deg, var(--gold-300), var(--gold-600));}
-nav.tabs button[data-tab="lapor"].active{background:linear-gradient(160deg, #7fd3ff, var(--blue-500));color:#04182f;}
-nav.tabs button[data-tab="leaderboard"].active{background:linear-gradient(160deg, var(--gold-300), var(--gold-600));}
-nav.tabs button[data-tab="layanan"].active{background:linear-gradient(160deg, #9be8c2, var(--ok));color:#04241a;}
-nav.tabs button[data-tab="riwayat"].active{background:linear-gradient(160deg, #cdd8f5, var(--blue-500));color:#04182f;}
-nav.tabs button[data-tab="admin"].active{background:linear-gradient(160deg, #ffe2a8, var(--gold-600));color:#241a02;}
 
 /* ---------- generic cards ---------- */
 .card{
@@ -968,13 +954,22 @@ function defaultConfig(){
   };
 }
 let CFG = defaultConfig();
+/* loadConfig() mengembalikan true kalau berhasil (baik memuat data asli
+   MAUPUN memang benar-benar pertama kali dipakai), atau false kalau gagal
+   membaca (jaringan bermasalah). Saat GAGAL, CFG di memori TIDAK diubah
+   sama sekali (tetap memakai nilai sebelumnya) — supaya satu gangguan
+   jaringan kecil tidak membuat daftar karyawan/produk/tim/target terlihat
+   kosong atau kembali ke bawaan. Kode yang butuh kepastian data terbaru
+   sebelum MENYIMPAN (mutateConfigAndSave) memeriksa nilai true/false ini
+   untuk membatalkan proses simpan kalau gagal. */
 async function loadConfig(){
-  const raw = await loadList(KEY_CONFIG); // disimpan sebagai array berisi satu objek config
-  // Catatan: kalau fetch di atas gagal (jaringan bermasalah), loadList/fetchRaw
-  // sekarang MELEMPAR error (bukan diam-diam mengembalikan array kosong) —
-  // sehingga baris di bawah ini HANYA berjalan kalau data benar-benar
-  // berhasil diambil dari server, dan kita bisa yakin `raw` mencerminkan
-  // keadaan server yang sesungguhnya, bukan sekadar "gagal ambil data".
+  let raw;
+  try{
+    raw = await loadList(KEY_CONFIG); // disimpan sebagai array berisi satu objek config
+  }catch(e){
+    window.__storageErrors.push(String(e && e.message || e));
+    return false;
+  }
   if(Array.isArray(raw) && raw.length && raw[0] && typeof raw[0]==="object"){
     CFG = {...defaultConfig(), ...raw[0]};
   } else {
@@ -982,6 +977,7 @@ async function loadConfig(){
     CFG = defaultConfig();
     await saveConfig();
   }
+  return true;
 }
 async function saveConfig(){
   const payload = {...CFG, __isConfig:true};
@@ -1221,17 +1217,37 @@ const KEY_MARKETING = "marketing:reports"; // laporan marketing, global (tidak t
 const KEY_INFO = "info:posts"; // pengumuman/info karyawan, global (tidak terikat bulan)
 const KEY_PIPELINE = "pipeline:master"; // pipeline dana, global (tidak terikat bulan)
 
+/* Setiap jenis data dimuat SECARA TERPISAH (bukan Promise.all yang gagal
+   total kalau satu saja gagal) — supaya satu gangguan jaringan kecil pada
+   SATU jenis data (mis. Informasi) tidak membuat SEMUA data lain (laporan,
+   leads, pipeline, dst.) ikut terlihat kosong. Kalau satu bagian gagal
+   dimuat, bagian itu saja yang tetap memakai data sebelumnya — bukan
+   seluruh halaman. */
+async function safeLoadList(key){
+  try{
+    return await loadList(key);
+  }catch(e){
+    window.__storageErrors.push(String(e && e.message || e));
+    return null; // null = gagal muat, JANGAN timpa data yang sudah ada
+  }
+}
 async function loadMonthData(){
   const [r,l,p,ld,inf,pl,mk] = await Promise.all([
-    loadList(keyReports(state.month)),
-    loadList(keyLayanan(state.month)),
-    loadList(keyPenilaian(state.month)),
-    loadList(KEY_LEADS),
-    loadList(KEY_INFO),
-    loadList(KEY_PIPELINE),
-    loadList(KEY_MARKETING),
+    safeLoadList(keyReports(state.month)),
+    safeLoadList(keyLayanan(state.month)),
+    safeLoadList(keyPenilaian(state.month)),
+    safeLoadList(KEY_LEADS),
+    safeLoadList(KEY_INFO),
+    safeLoadList(KEY_PIPELINE),
+    safeLoadList(KEY_MARKETING),
   ]);
-  state.reports = r; state.layanan = l; state.penilaian = p; state.leads = ld; state.info = inf; state.pipeline = pl; state.marketing = mk;
+  if(r !== null) state.reports = r;
+  if(l !== null) state.layanan = l;
+  if(p !== null) state.penilaian = p;
+  if(ld !== null) state.leads = ld;
+  if(inf !== null) state.info = inf;
+  if(pl !== null) state.pipeline = pl;
+  if(mk !== null) state.marketing = mk;
   rebuildIndex();
 }
 
@@ -3914,12 +3930,8 @@ function drawAdminNipList(){
    default) — supaya kegagalan jaringan sesaat tidak pernah bisa menghapus
    data asli yang sudah tersimpan di server. */
 async function mutateConfigAndSave(mutatorFn){
-  try{
-    await loadConfig();
-  }catch(e){
-    window.__storageErrors.push(String(e && e.message || e));
-    return false;
-  }
+  const loaded = await loadConfig();
+  if(!loaded) return false; // gagal ambil data terbaru -- batalkan simpan sepenuhnya
   mutatorFn(CFG);
   const ok = await saveConfig();
   return ok;

@@ -3948,6 +3948,18 @@ function createPdfDoc(subtitleRight){
     });
     y += 12;
   }
+  function fitText(val, maxW){
+    // Pangkas teks dengan "…" berdasarkan LEBAR PIKSEL sesungguhnya (bukan
+    // jumlah karakter tetap) — supaya tidak ada teks yang terpotong tanggung
+    // atau bertabrakan dengan kolom sebelahnya, apa pun panjang isinya.
+    if(doc.getTextWidth(val) <= maxW) return val;
+    let lo = 0, hi = val.length;
+    while(lo < hi){
+      const mid = Math.ceil((lo+hi)/2);
+      if(doc.getTextWidth(val.slice(0,mid)+"…") <= maxW) lo = mid; else hi = mid-1;
+    }
+    return val.slice(0,lo)+"…";
+  }
   function tableRow(cols, values, opts={}){
     ensureSpace(13);
     if(opts.zebra){ doc.setFillColor(246,248,252); doc.rect(MARGIN, y-9, PAGE_W-2*MARGIN, 12.5, "F"); }
@@ -3955,18 +3967,27 @@ function createPdfDoc(subtitleRight){
     const c = opts.color||[40,40,40]; doc.setTextColor(c[0],c[1],c[2]);
     let cx = MARGIN+5;
     cols.forEach((col,i)=>{
-      const val = String(values[i] ?? "");
+      const raw = String(values[i] ?? "");
+      const val = fitText(raw, col.w-10);
       doc.text(val, col.align==="right"? cx+col.w-8 : cx, y, {align:col.align||"left"});
       cx += col.w;
     });
     y += 12.5;
   }
   function paragraph(text, opts={}){
-    ensureSpace(opts.lineHeight||14);
     doc.setFont("helvetica", opts.bold?"bold":"normal"); doc.setFontSize(opts.size||9.5);
     const c = opts.color||[40,40,40]; doc.setTextColor(c[0],c[1],c[2]);
-    doc.text(text, MARGIN+(opts.indent||0), y, {maxWidth: PAGE_W-2*MARGIN-(opts.indent||0)});
-    y += (opts.lineHeight||14);
+    const maxW = PAGE_W-2*MARGIN-(opts.indent||0);
+    // Bungkus teks ke beberapa baris dulu (kalau panjang), lalu majukan
+    // kursor y SESUAI JUMLAH BARIS SEBENARNYA — supaya konten berikutnya
+    // tidak pernah menimpa/bertabrakan dengan teks yang baru saja dibungkus.
+    const lines = doc.splitTextToSize(String(text ?? ""), maxW);
+    const lh = opts.lineHeight || (opts.size ? opts.size*1.35 : 13);
+    ensureSpace(lh * lines.length + 4);
+    lines.forEach(line=>{
+      doc.text(line, MARGIN+(opts.indent||0), y);
+      y += lh;
+    });
   }
   function finish(filename){
     const totalPages = doc.internal.getNumberOfPages();
@@ -4040,7 +4061,7 @@ function pdfLaporDetail(){
   p.tableHeader(cols);
   [...marked].sort((a,b)=>b.createdAt-a.createdAt).forEach((r,i)=>{
     const statusLabel = r.isDuplicate ? "Duplikat" : r.status==='approved'?'Disetujui':r.status==='rejected'?'Ditolak':'Menunggu';
-    p.tableRow(cols, [r.date, r.employee, r.product, r.amount, (r.note||"").slice(0,40), statusLabel], {zebra:i%2===0, color: r.isDuplicate?[194,58,58]:[40,40,40]});
+    p.tableRow(cols, [r.date, r.employee, r.product, r.amount, (r.note||""), statusLabel], {zebra:i%2===0, color: r.isDuplicate?[194,58,58]:[40,40,40]});
   });
   p.finish(`Detail_LaporAkuisisi_${state.month}.pdf`);
   toast("PDF detail Lapor Akuisisi berhasil diunduh", "📄");
@@ -4136,7 +4157,7 @@ function pdfAdminDetail(){
   const cols = [{label:"TGL",w:55},{label:"NAMA",w:150},{label:"PRODUK",w:100},{label:"JML",w:40,align:"right"},{label:"KET",w:150}];
   p.tableHeader(cols);
   if(!pending.length){ p.paragraph("Tidak ada laporan yang menunggu — semua sudah diproses.", {indent:4}); }
-  pending.forEach((r,i)=> p.tableRow(cols, [r.date, r.employee, r.product, r.amount, (r.note||"").slice(0,40)], {zebra:i%2===0}));
+  pending.forEach((r,i)=> p.tableRow(cols, [r.date, r.employee, r.product, r.amount, (r.note||"")], {zebra:i%2===0}));
   p.finish(`Detail_Admin_${state.month}.pdf`);
   toast("PDF detail Admin berhasil diunduh", "📄");
 }
@@ -4215,6 +4236,15 @@ async function downloadSummaryPDF(){
       });
       y += 12;
     }
+    function fitText(val, maxW){
+      if(doc.getTextWidth(val) <= maxW) return val;
+      let lo = 0, hi = val.length;
+      while(lo < hi){
+        const mid = Math.ceil((lo+hi)/2);
+        if(doc.getTextWidth(val.slice(0,mid)+"…") <= maxW) lo = mid; else hi = mid-1;
+      }
+      return val.slice(0,lo)+"…";
+    }
     function tableRow(cols, values, opts={}){
       ensureSpace(13);
       if(opts.zebra){ doc.setFillColor(246,248,252); doc.rect(MARGIN, y-9, PAGE_W-2*MARGIN, 12.5, "F"); }
@@ -4222,7 +4252,8 @@ async function downloadSummaryPDF(){
       const c = opts.color||[40,40,40]; doc.setTextColor(c[0],c[1],c[2]);
       let cx = MARGIN+5;
       cols.forEach((col,i)=>{
-        const val = String(values[i] ?? "");
+        const raw = String(values[i] ?? "");
+        const val = fitText(raw, col.w-10);
         doc.text(val, col.align==="right"? cx+col.w-8 : cx, y, {align:col.align||"left"});
         cx += col.w;
       });
@@ -4255,7 +4286,12 @@ async function downloadSummaryPDF(){
       `Pipeline Dana — Total Pipeline: ${fmtJuta(pipelineTotalPipeline(state.pipeline))}, Total Potensi: ${fmtJuta(pipelineTotalPotensi(state.pipeline))} (${state.pipeline.length} entri — detail lengkap di halaman Pipeline Dana)`,
     ];
     doc.setFontSize(9.3);
-    kpis.forEach(line=>{ ensureSpace(14); doc.setFont("helvetica","normal"); doc.setTextColor(40,40,40); doc.text("•  "+line, MARGIN+2, y, {maxWidth:PAGE_W-2*MARGIN-10}); y+=15; });
+    kpis.forEach(line=>{
+      doc.setFont("helvetica","normal"); doc.setTextColor(40,40,40);
+      const lines = doc.splitTextToSize("•  "+line, PAGE_W-2*MARGIN-10);
+      ensureSpace(15*lines.length);
+      lines.forEach((ln,i)=>{ doc.text(ln, MARGIN+2, y); y += 15; });
+    });
     y += 8;
 
     sectionTitle("Pencapaian per Tim");
@@ -4314,7 +4350,11 @@ async function downloadSummaryPDF(){
     // ===== HALAMAN: RINCIAN GAP — KARYAWAN BELUM MENCAPAI TARGET =====
     newPage("Karyawan Belum Mencapai Target — Rincian Gap per Produk");
     doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(90,90,90);
-    doc.text(`${belowTarget.length} dari ${stats.length} karyawan masih di bawah 100% pencapaian. Rincian produk yang masih kurang untuk masing-masing karyawan:`, MARGIN, y, {maxWidth:PAGE_W-2*MARGIN}); y+=22;
+    {
+      const introLines = doc.splitTextToSize(`${belowTarget.length} dari ${stats.length} karyawan masih di bawah 100% pencapaian. Rincian produk yang masih kurang untuk masing-masing karyawan:`, PAGE_W-2*MARGIN);
+      introLines.forEach(ln=>{ doc.text(ln, MARGIN, y); y += 13; });
+      y += 8;
+    }
     if(!belowTarget.length){
       doc.setFont("helvetica","bold"); doc.setFontSize(10); doc.setTextColor(28,138,85);
       doc.text("Seluruh karyawan telah mencapai atau melampaui target bulan ini. 🎉", MARGIN, y); y+=16;

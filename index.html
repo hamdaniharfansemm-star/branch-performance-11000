@@ -4246,6 +4246,7 @@ async function downloadSummaryPDF(){
       `Karyawan mencapai/melampaui target: ${exceeded} dari ${stats.length} karyawan`,
       `Karyawan masih di bawah target: ${belowTarget.length} dari ${stats.length} karyawan`,
       `Total laporan akuisisi disetujui bulan ini: ${state.reports.filter(r=>r.status==='approved').length} (menunggu: ${state.reports.filter(r=>r.status==='pending').length})`,
+      `Pipeline Dana — Total Pipeline: ${fmtJuta(pipelineTotalPipeline(state.pipeline))}, Total Potensi: ${fmtJuta(pipelineTotalPotensi(state.pipeline))} (${state.pipeline.length} entri — detail lengkap di halaman Pipeline Dana)`,
     ];
     doc.setFontSize(9.3);
     kpis.forEach(line=>{ ensureSpace(14); doc.setFont("helvetica","normal"); doc.setTextColor(40,40,40); doc.text("•  "+line, MARGIN+2, y, {maxWidth:PAGE_W-2*MARGIN-10}); y+=15; });
@@ -4351,6 +4352,40 @@ async function downloadSummaryPDF(){
     } else {
       doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(120,120,120);
       doc.text("Belum ada data penilaian bulan ini.", MARGIN, y); y+=14;
+    }
+
+    // ===== HALAMAN: PIPELINE DANA (Tabungan, Giro, Deposito, CASA, DPK) =====
+    newPage("Pipeline Dana — Tabungan, Giro, Deposito, CASA & DPK");
+    sectionTitle("Ringkasan per Jenis Rekening");
+    const plCols = [{label:"JENIS",w:140},{label:"POTENSI",w:80,align:"right"},{label:"PIPELINE",w:80,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:"TARGET",w:75,align:"right"},{label:"GAP",w:75,align:"right"}];
+    tableHeader(plCols);
+    const plGroups = [
+      ["Tabungan", ["Tabungan"]], ["Giro", ["Giro"]], ["Deposito", ["Deposito"]],
+      ["CASA (Tabungan+Giro)", ["Tabungan","Giro"]], ["DPK (Tab.+Giro+Deposito)", ["Tabungan","Giro","Deposito"]],
+    ];
+    plGroups.forEach(([label, jenisList], i)=>{
+      const st = pipelineGroupStats(state.pipeline, jenisList);
+      tableRow(plCols, [label, fmtJuta(st.potensi), fmtJuta(st.pipelineTotal), fmtJuta(st.realisasi), fmtJuta(st.target), (st.gap>=0?'+':'')+fmtJuta(st.gap)], {zebra:i%2===0, color: st.gap<0?[194,58,58]:[40,40,40]});
+    });
+    y += 10;
+
+    const totalPipelineAll = pipelineTotalPipeline(state.pipeline);
+    const totalPotensiAll = pipelineTotalPotensi(state.pipeline);
+    ensureSpace(30);
+    doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(11,30,58);
+    doc.text(`Total Pipeline keseluruhan: ${fmtJuta(totalPipelineAll)}   |   Total Potensi keseluruhan: ${fmtJuta(totalPotensiAll)}   |   ${state.pipeline.length} entri`, MARGIN, y);
+    y += 20;
+
+    sectionTitle(`Daftar Lengkap Entri Pipeline (${state.pipeline.length} entri)`);
+    const plDetailCols = [{label:"PIC",w:95},{label:"NASABAH",w:100},{label:"JENIS",w:55},{label:"NO. REK",w:75},{label:"NOMINAL",w:55,align:"right"},{label:"SUMBER",w:65},{label:"TGL",w:50},{label:"STATUS",w:60}];
+    tableHeader(plDetailCols);
+    if(!state.pipeline.length){
+      doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(120,120,120);
+      doc.text("Belum ada laporan pipeline dana.", MARGIN, y); y+=14;
+    } else {
+      [...state.pipeline].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).forEach((e,i)=>{
+        tableRow(plDetailCols, [e.pic, e.nasabah, e.jenis, e.norek, fmtJuta(e.nominal), e.sumber, e.tanggal, e.status], {zebra:i%2===0});
+      });
     }
 
     // footer halaman terakhir

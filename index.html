@@ -198,7 +198,6 @@ nav.tabs button.active{
     inset 0 -1.5px 0 rgba(0,0,0,0.55),
     inset 1.5px 0 0 rgba(255,255,255,0.22),
     inset -1.5px 0 0 rgba(0,0,0,0.35);
-  backdrop-filter:blur(6px);
   transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
 .card.glow:hover{
@@ -398,7 +397,7 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
 .info-post-hero .info-post-body{padding-top:16px;}
 .info-pin-badge, .info-new-badge{
   position:absolute;top:10px;z-index:2;padding:4px 10px;border-radius:20px;font-size:10.5px;font-weight:800;
-  backdrop-filter:blur(6px);box-shadow:0 4px 12px -4px rgba(0,0,0,0.6);
+  box-shadow:0 4px 12px -4px rgba(0,0,0,0.6);
 }
 .info-pin-badge{left:10px;background:linear-gradient(120deg, var(--gold-300), var(--gold-500));color:#241a02;}
 .info-new-badge{right:10px;background:linear-gradient(120deg, #39c97a, #1c9f63);color:#04241a;}
@@ -528,7 +527,7 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
     radial-gradient(800px 550px at 85% 90%, rgba(62,230,242,0.14), transparent 55%),
     linear-gradient(160deg, #030710, #0a1830 55%, #040911);
   padding:20px;
-  animation:loginFade .4s ease;
+  animation:loginFade .18s ease;
 }
 @keyframes loginFade{from{opacity:0;}to{opacity:1;}}
 /* saat login diproses: bekukan semua animasi dekoratif layar login agar
@@ -585,18 +584,9 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
     inset 0 1.5px 0 rgba(255,255,255,0.6),
     inset 0 -1.5px 0 rgba(0,0,0,0.5);
   backdrop-filter:blur(14px);
-  animation:cardRise .5s cubic-bezier(.2,.9,.2,1);
+  animation:cardRise .3s cubic-bezier(.2,.9,.2,1);
 }
 @keyframes cardRise{from{opacity:0;transform:translateY(24px) scale(0.97);}to{opacity:1;transform:translateY(0) scale(1);}}
-.login-brand-row{display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:2px;}
-.login-side-logo{width:38px;height:auto;max-height:26px;object-fit:contain;opacity:0.92;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));}
-.login-emblem{
-  width:60px;height:60px;border-radius:18px;margin:0;
-  display:flex;align-items:center;justify-content:center;color:var(--gold-300);
-  background:linear-gradient(150deg, var(--navy-800), var(--navy-950));
-  border:1px solid rgba(244,201,93,0.4);
-  box-shadow:0 0 0 1px rgba(244,201,93,0.15), 0 0 26px rgba(244,201,93,0.4), inset 0 0 16px rgba(47,111,214,0.3);
-}
 .login-title{
   font-family:var(--ff-display);font-size:24px;font-weight:800;margin:0;color:#fff;letter-spacing:0.2px;
   text-shadow:0 0 12px rgba(62,230,242,0.5);
@@ -671,23 +661,17 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
     <div class="login-orbit o1"></div><div class="login-orbit o2"></div>
   </div>
   <div class="login-card">
-    <div class="login-brand-row">
-      <img src="" id="loginLivinImg" alt="Livin by Mandiri" class="login-side-logo">
-      <div class="login-emblem">
-        <img src="" id="loginLogoImg" alt="Bank Mandiri" style="width:34px;height:auto;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.4))">
-      </div>
-      <img src="" id="loginKopraImg" alt="Kopra by Mandiri" class="login-side-logo">
-    </div>
     <h1 class="login-title" id="loginBrandTitle">Branch Performance <span class="hl">11000</span></h1>
     <p class="login-sub" id="loginBrandSub">Bank Mandiri &middot; Cabang Jambi Gatot Subroto</p>
     <form id="loginForm">
-      <div class="field" style="margin-top:22px">
+      <div class="field" style="margin-top:22px" id="loginNIPField">
         <label>Login</label>
         <input type="text" id="loginNIP" inputmode="numeric" placeholder="Masukkan NIP Anda" autocomplete="off" required>
       </div>
-      <button type="submit" class="btn primary" style="width:100%;justify-content:center;margin-top:8px">🔐 Masuk ke Dashboard</button>
+      <div id="loginStep2"></div>
+      <button type="submit" class="btn primary" id="loginSubmitBtn" style="width:100%;justify-content:center;margin-top:8px">🔐 Masuk ke Dashboard</button>
     </form>
-    <p class="login-foot">Tulis NIP Anda untuk masuk. Akses Admin otomatis aktif untuk NIP terdaftar.</p>
+    <p class="login-foot" id="loginFootHint">Tulis NIP Anda untuk masuk. Akses Admin otomatis aktif untuk NIP terdaftar.</p>
   </div>
 </div>
 
@@ -697,7 +681,6 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
   <header class="top">
     <div class="aurora a1"></div><div class="aurora a2"></div>
     <div class="brand">
-      <img src="" id="headerLogoImg" alt="Bank Mandiri" style="height:30px;width:auto;filter:drop-shadow(0 2px 5px rgba(0,0,0,0.35))">
       <div>
         <h1 id="headerBrandTitle">Branch Performance <span class="hl">11000</span></h1>
         <small id="headerBrandSub">Bank Mandiri &middot; Cabang Jambi Gatot Subroto</small>
@@ -741,7 +724,6 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn primary" id="pdfBtn">📄 PDF Lengkap</button>
-      <button class="btn primary" id="xlsxBtn" style="background:linear-gradient(150deg,#1c9f63,#0d5c39)">📊 Excel</button>
     </div>
   </div>
 
@@ -802,68 +784,6 @@ const LOGO_MANDIRI_B64 =
   "08P2/Pz3ymfRHybhz7yT7fmr92iG1gMUoWJL3u4t+FlsiMax07BVOEu3bfY/ZnCz9BJ6UV2MZOuahms6/eadbaei94Kxk8t6y2xbsrQuA3y6AlTX7bQNPYIm7rxEJ7V5bxRy+Qlaw18bVzAHGJi9vnwnWOX0aIl12bv5/Hh2Uhq5oAlK7IXT" +
   "92TbO5rio7fXH2JOWLrwjovekv413aXcKGR1XT9cqdx5ZCJ0Yjyh114szc7+hOn+1OAG322fxP/Eg2KmluDE7a9ys3x0GB2YuVylMA8dFguVO09MWjjET1JL0MHsrPCeOU9xKeWPeRHvgOw/CW6xzaP/iC/cngjBF+Q/x7GnGSlBi9VIMH1R" +
   "PDiaKPti1Ha29+Ypv3b37toiPXnHW7mGhvxdH2FXHX+hwesMKW1vK8AFopATPls7Udg2Hh8ufXVd8UeBcXwU19Ek2l41iG6ujOPtgr8DfCaN2f2VeV4AAAAASUVORK5CYII=";
-const LOGO_LIVIN_B64 =
-  "data:image/jpeg;base64,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";
-const LOGO_KOPRA_B64 =
-  "data:image/jpeg;base64,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";
 
 const DEFAULT_PRODUCTS = ["MTB","Payroll","Tabnow","MTR","LVM","EDC","GIRO","KOPRA","RTW","CC","Livin Next G","AXA"];
 const MAX_CAP = 1.20; // 120%
@@ -997,6 +917,7 @@ function defaultConfig(){
     teams: [...DEFAULT_TEAMS],
     teamIcons: {...DEFAULT_TEAM_ICON},
     adminNips: ["1290488196"],
+    adminAuth: {}, // { "<nip>": { email, passwordHash, resetCode, resetExpiry } } — keamanan akses Admin
     brandTitle: "Branch Performance",
     brandNumber: "11000",
     brandSubtitle: "Bank Mandiri · Cabang Jambi Gatot Subroto",
@@ -1124,6 +1045,28 @@ async function ensureXLSX(){
    Apps Script (yang masing-masing punya jeda/overhead sendiri), semuanya
    digabung jadi SATU request di awal. */
 let __loginPrefetchCache = null;
+/* ---- Keamanan Admin: hash password (SHA-256 lewat Web Crypto, bawaan
+   browser) & kirim email reset lewat Apps Script ---- */
+async function sha256Hex(text){
+  const enc = new TextEncoder().encode(String(text));
+  const hashBuf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(hashBuf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+function genResetCode(){
+  return String(Math.floor(100000 + Math.random()*900000)); // kode 6 digit
+}
+async function sendResetEmail(to, subject, body){
+  if(!APPS_SCRIPT_URL) return false; // mode window.storage (tanpa Apps Script) tidak bisa kirim email sungguhan
+  try{
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      body: JSON.stringify({ action:"sendEmail", to, subject, body }),
+    });
+    const data = await res.json();
+    return !!(data && data.ok);
+  }catch(e){ return false; }
+}
+
 async function preloginBatchFetch(keys){
   if(!APPS_SCRIPT_URL) return;
   try{
@@ -1565,8 +1508,17 @@ document.getElementById("musicBtn").onclick = ()=>{
   const ctx = cv.getContext("2d");
   let W,H,pts=[];
   let lastW = window.innerWidth;
+  // PENTING (performa mobile): #bgcanvas posisinya "fixed" (nempel di layar),
+  // jadi HANYA area viewport yang pernah terlihat — sebelumnya ukurannya malah
+  // dibuat setinggi SELURUH halaman (bisa ribuan piksel di halaman panjang
+  // seperti Dashboard/Pipeline Dana), padahal bagian di luar viewport itu tidak
+  // pernah tampak sama sekali. Ini boros render terus-menerus tanpa hasil,
+  // dan salah satu penyebab utama lag di HP. Sekarang tingginya cukup
+  // setinggi layar (viewport) saja.
+  const isSmallScreen = ()=> window.innerWidth < 720;
   function buildParticles(){
-    const n = Math.min(45, Math.floor(W*H/34000));
+    const cap = isSmallScreen() ? 22 : 45; // lebih sedikit partikel di layar kecil/HP
+    const n = Math.min(cap, Math.floor(W*H/34000));
     pts = Array.from({length:n}, ()=>({
       x:Math.random()*W, y:Math.random()*H, r:Math.random()*1.6+0.4,
       s:Math.random()*0.4+0.1, a:Math.random()*Math.PI*2,
@@ -1575,7 +1527,7 @@ document.getElementById("musicBtn").onclick = ()=>{
   }
   function resize(){
     W = cv.width = window.innerWidth;
-    H = cv.height = Math.max(window.innerHeight, document.body.scrollHeight);
+    H = cv.height = window.innerHeight;
     buildParticles();
     lastW = W;
   }
@@ -1594,24 +1546,32 @@ document.getElementById("musicBtn").onclick = ()=>{
         resize(); // lebar berubah sungguhan -> rebuild penuh
       } else {
         // hanya tinggi yang berubah (khas keyboard virtual) -> update ukuran saja
-        H = cv.height = Math.max(window.innerHeight, document.body.scrollHeight);
+        H = cv.height = window.innerHeight;
       }
     }, 180);
   }
   window.addEventListener("resize", onResize);
   resize();
+  // Hentikan animasi sepenuhnya saat tab/aplikasi tidak sedang dilihat (mis.
+  // browser di-minimize atau pindah aplikasi lain di HP) — tidak ada gunanya
+  // terus menggambar sesuatu yang tidak sedang ditampilkan, dan ini membantu
+  // baterai + performa saat kembali ke aplikasi.
+  let animPaused = false;
+  document.addEventListener("visibilitychange", ()=>{ animPaused = document.hidden; });
   function tick(){
-    ctx.clearRect(0,0,W,H);
-    pts.forEach(p=>{
-      p.a += 0.02;
-      const alpha = 0.25 + Math.sin(p.a)*0.25;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
-      ctx.fillStyle = p.gold ? `rgba(244,201,93,${alpha})` : `rgba(79,143,239,${alpha})`;
-      ctx.fill();
-      p.y -= p.s;
-      if(p.y < -5){ p.y = H+5; p.x = Math.random()*W; }
-    });
+    if(!animPaused){
+      ctx.clearRect(0,0,W,H);
+      pts.forEach(p=>{
+        p.a += 0.02;
+        const alpha = 0.25 + Math.sin(p.a)*0.25;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+        ctx.fillStyle = p.gold ? `rgba(244,201,93,${alpha})` : `rgba(79,143,239,${alpha})`;
+        ctx.fill();
+        p.y -= p.s;
+        if(p.y < -5){ p.y = H+5; p.x = Math.random()*W; }
+      });
+    }
     requestAnimationFrame(tick);
   }
   tick();
@@ -3077,9 +3037,7 @@ function renderPipeline(){
         <div class="val" id="filteredTotal" style="font-size:22px"></div>
         <div class="sub" id="filteredCount"></div>
       </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-        <button class="btn primary" id="pipelineExportBtn">📊 Unduh Excel</button>
-      </div>
+      <p class="hint" style="margin-bottom:14px">Gunakan tombol 📄 di header untuk mengunduh laporan PDF lengkap halaman Pipeline Dana ini.</p>
       <div id="pipelineList" style="max-height:520px;overflow:auto"></div>
     </div>`,
   };
@@ -3126,7 +3084,6 @@ function renderPipeline(){
     refreshPipelineView();
   };
 
-  document.getElementById("pipelineExportBtn").onclick = downloadPipelineExcel;
 
   if(isAdmin){
     document.getElementById("pipelineTargetSaveBtn").onclick = async ()=>{
@@ -3493,62 +3450,6 @@ function openEditPipelineKaryawan(id){
   };
 }
 
-async function downloadPipelineExcel(){
-  try{
-    toast("Menyiapkan Excel...", "⏳");
-    await ensureXLSX();
-    const f = currentPipelineFilters();
-    const filtered = applyPipelineFilters(state.pipeline, f);
-    const wb = XLSX.utils.book_new();
-    const rows = filtered.map((e,i)=>({
-      "No": i+1, "Nama PIC": e.pic, "Nama Nasabah": e.nasabah, "Jenis Rekening": e.jenis,
-      "Nomor Rekening": e.norek, "Nominal Komitmen (juta)": e.nominal, "Sumber Dana": e.sumber,
-      "Tanggal Komitmen": e.tanggal, "Status": e.status,
-    }));
-    const ws = XLSX.utils.json_to_sheet(rows.length?rows:[{"Info":"Belum ada data pipeline sesuai filter"}]);
-    ws['!cols'] = [8,12,10,26,14,16,18,20,14,14].map(w=>({wch:w}));
-    XLSX.utils.book_append_sheet(wb, ws, "Pipeline Dana");
-
-    const plExcelGroups = [
-      ["Tabungan", ["Tabungan"]], ["Giro", ["Giro"]], ["Deposito", ["Deposito"]],
-      ["CASA (Tabungan+Giro)", ["Tabungan","Giro"]], ["DPK (Tab.+Giro+Deposito)", ["Tabungan","Giro","Deposito"]],
-    ];
-    function statusLabelFor(pct){ return pct < 95 ? "Merah (<95%)" : pct <= 100 ? "Kuning (95-100%)" : "Hijau (>100%)"; }
-    function buildSchemeRows(schemeKey){
-      return plExcelGroups.map(([label, jenisList])=>{
-        const st = pipelineGroupStats(filtered, jenisList);
-        const sch = st[schemeKey];
-        return {
-          "Jenis Rekening": label,
-          "Total Potensi (juta)": st.potensi,
-          "Total Pipeline (juta)": st.pipelineTotal,
-          "Realisasi (juta)": st.realisasi,
-          "Realisasi + Potensi (juta)": st.combined,
-          "Target (juta)": st.target,
-          "Gap (juta)": sch.gap,
-          "MTD (juta)": sch.mtd,
-          "YTD (juta)": sch.ytd,
-          "YOY (juta)": sch.yoy,
-          "Pencapaian (%)": st.target>0 ? Number(sch.pct.toFixed(1)) : 0,
-          "Status": st.target>0 ? statusLabelFor(sch.pct) : "Target belum diatur",
-        };
-      });
-    }
-    const wsRealita = XLSX.utils.json_to_sheet(buildSchemeRows("realita"));
-    wsRealita['!cols'] = [24,16,16,14,20,12,12,12,12,12,14,20].map(w=>({wch:w}));
-    XLSX.utils.book_append_sheet(wb, wsRealita, "Laporan Realita");
-
-    const wsKomitmen = XLSX.utils.json_to_sheet(buildSchemeRows("komitmen"));
-    wsKomitmen['!cols'] = [24,16,16,14,20,12,12,12,12,12,14,20].map(w=>({wch:w}));
-    XLSX.utils.book_append_sheet(wb, wsKomitmen, "Laporan Komitmen");
-
-    XLSX.writeFile(wb, `Pipeline_Dana_${new Date().toISOString().slice(0,10)}.xlsx`);
-    toast("File Excel berhasil diunduh", "📊");
-    playSound("drum");
-  }catch(err){
-    toast("Gagal membuat Excel, coba lagi", "⚠️");
-  }
-}
 
 
 /* ---------------- INFORMASI (pengumuman + foto untuk karyawan) ---------------- */
@@ -4744,6 +4645,11 @@ function pdfLaporDetail(){
   const marked = state._dupMarked || markDuplicates(state.reports);
   const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Lapor Akuisisi — ${monthLabel()}`);
   p.newPage(`Detail Laporan Akuisisi — ${monthLabel()}`);
+  const approved = marked.filter(r=>r.status==='approved').length;
+  const pending = marked.filter(r=>r.status==='pending').length;
+  const rejected = marked.filter(r=>r.status==='rejected').length;
+  p.paragraph(`Total Laporan: ${marked.length}   |   Disetujui: ${approved}   |   Menunggu: ${pending}   |   Ditolak: ${rejected}`, {bold:true});
+  p.setY(p.getY()+8);
   const cols = [{label:"TGL",w:55},{label:"NAMA",w:130},{label:"PRODUK",w:90},{label:"JML",w:35,align:"right"},{label:"KET",w:150},{label:"STATUS",w:65}];
   p.tableHeader(cols);
   [...marked].sort((a,b)=>b.createdAt-a.createdAt).forEach((r,i)=>{
@@ -4760,6 +4666,14 @@ function pdfLeaderboardDetail(){
   const list = scope==="all" ? allEmployeeStats() : teamStats(scope);
   const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Leaderboard — ${monthLabel()}`);
   p.newPage(`Leaderboard Akuisisi — ${scope==="all"?"Semua Karyawan":scope} — ${monthLabel()}`);
+  p.sectionTitle("Peringkat per Tim");
+  const teamCols = [{label:"#",w:40},{label:"TIM",w:220},{label:"JML KARYAWAN",w:130,align:"right"},{label:"RATA² CAPAIAN",w:110,align:"right"},{label:"STATUS",w:90}];
+  p.tableHeader(teamCols);
+  const teamsToShow = scope==="all" ? CFG.teams : [scope];
+  const teamRanked = teamsToShow.map(t=>({team:t, avg:teamAverage(t), cnt:CFG.employees.filter(e=>e.team===t).length})).sort((a,b)=>b.avg-a.avg);
+  teamRanked.forEach((t,i)=> p.tableRow(teamCols, [`${i+1}`, t.team, t.cnt, pctStr(t.avg), statusFor(t.avg).label], {zebra:i%2===0}));
+  p.setY(p.getY()+10);
+  p.sectionTitle(`Peringkat per Karyawan — ${scope==="all"?"Semua Tim":scope}`);
   const cols = [{label:"#",w:40},{label:"NAMA",w:220},{label:"TIM",w:150},{label:"CAPAIAN",w:80,align:"right"},{label:"STATUS",w:70}];
   p.tableHeader(cols);
   list.forEach((s,i)=> p.tableRow(cols, [`${i+1}`, s.name, s.team, pctStr(s.overall), statusFor(s.overall).label], {zebra:i%2===0}));
@@ -5182,7 +5096,6 @@ async function downloadSummaryPDF(){
   }
 }
 document.getElementById("pdfBtn").onclick = downloadSummaryPDF;
-document.getElementById("xlsxBtn").onclick = downloadSummaryExcel;
 
 /* ============================================================
    EXPORT — EXCEL (multi-sheet ringkasan performa, lebih detail & rapi)
@@ -5191,137 +5104,6 @@ function styleSheet(ws, colWidths, titleRows=0){
   ws['!cols'] = colWidths.map(w=>({wch:w}));
   ws['!rows'] = ws['!rows'] || [];
   if(titleRows) ws['!rows'][0] = {hpt:22};
-}
-async function downloadSummaryExcel(){
-  try{
-    toast("Menyiapkan Excel...", "⏳");
-    await ensureXLSX();
-    const stats = allEmployeeStats();
-    const branchAvg = stats.length ? stats.reduce((s,e)=>s+e.overall,0)/stats.length : 0;
-    const wb = XLSX.utils.book_new();
-    const printedAt = new Date().toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'});
-
-    // Sheet 0: Cover / Ringkasan Eksekutif
-    const coverRows = [
-      [`${CFG.brandTitle.toUpperCase()} ${CFG.brandNumber}`],
-      [CFG.brandSubtitle],
-      [""],
-      ["Periode", monthLabel()],
-      ["Dicetak", printedAt],
-      [""],
-      ["RINGKASAN UTAMA"],
-      ["Rata-rata Pencapaian Cabang", pctStr(branchAvg)],
-      ["Karyawan Capai/Lampaui Target", `${stats.filter(s=>s.overall>=1).length} dari ${stats.length}`],
-      ["Karyawan Gap Besar (<70%)", `${stats.filter(s=>s.overall<0.7).length}`],
-      ["Total Laporan Akuisisi Disetujui", `${state.reports.filter(r=>r.status==="approved").length}`],
-      ["Total Laporan Menunggu Approval", `${state.reports.filter(r=>r.status==="pending").length}`],
-      ["Karyawan Terbaik Bulan Ini", stats[0] ? `${stats[0].name} (${pctStr(stats[0].overall)})` : "-"],
-      [""],
-      [`Dokumen ini dibuat otomatis oleh ${CFG.brandTitle} ${CFG.brandNumber} — created by Hamdani Harfan`],
-    ];
-    const wsCover = XLSX.utils.aoa_to_sheet(coverRows);
-    wsCover['!merges'] = [{s:{r:0,c:0},e:{r:0,c:1}},{s:{r:1,c:0},e:{r:1,c:1}},{s:{r:6,c:0},e:{r:6,c:1}},{s:{r:14,c:0},e:{r:14,c:1}}];
-    styleSheet(wsCover, [34,20]);
-    XLSX.utils.book_append_sheet(wb, wsCover, "Ringkasan");
-
-    // Sheet 1: Per Karyawan — lengkap dengan breakdown 12 produk
-    const empRows = stats.map((s,i)=>{
-      const row = {
-        "Peringkat": i+1, "Nama": s.name, "Tim": s.team,
-        "Pencapaian Keseluruhan (%)": Number((s.overall*100).toFixed(1)),
-        "Status": statusFor(s.overall).label,
-      };
-      s.perProduct.forEach(p=>{
-        row[`${p.product} (Real/Target)`] = `${p.realisasi}/${p.target}`;
-      });
-      return row;
-    });
-    const wsEmp = XLSX.utils.json_to_sheet(empRows);
-    styleSheet(wsEmp, [10,26,14,20,12, ...CFG.products.map(()=>16)]);
-    XLSX.utils.book_append_sheet(wb, wsEmp, "Per Karyawan");
-
-    // Sheet 2: Per Tim
-    const teamRows = CFG.teams.map(t=>{
-      const cnt = CFG.employees.filter(e=>e.team===t).length;
-      const avg = teamAverage(t);
-      return {
-        "Tim": t, "Jumlah Karyawan": cnt,
-        "Rata-rata Pencapaian (%)": Number((avg*100).toFixed(1)),
-        "Status": statusFor(avg).label,
-      };
-    });
-    const wsTeam = XLSX.utils.json_to_sheet(teamRows);
-    styleSheet(wsTeam, [20,16,22,14]);
-    XLSX.utils.book_append_sheet(wb, wsTeam, "Per Tim");
-
-    // Sheet 3: Per Produk (cabang)
-    const prodRows = CFG.products.map(p=>{
-      let target=0, real=0;
-      CFG.employees.forEach(e=>{ target += e.targets[p]||0; real += (realisasiFor(e.name)[p]||0); });
-      const pct = target>0 ? Math.min(real/target, MAX_CAP) : 0;
-      return {"Produk": p, "Realisasi": real, "Target": target, "Pencapaian (%)": Number((pct*100).toFixed(1)), "Status": statusFor(pct).label};
-    }).sort((a,b)=>b["Pencapaian (%)"]-a["Pencapaian (%)"]);
-    const wsProd = XLSX.utils.json_to_sheet(prodRows);
-    styleSheet(wsProd, [20,14,14,18,14]);
-    XLSX.utils.book_append_sheet(wb, wsProd, "Per Produk");
-
-    // Sheet 4: Leaderboard Layanan Nasabah (CS & Teller)
-    const layananRows = [...LAYANAN_EMPLOYEES.CS, ...LAYANAN_EMPLOYEES.TELLER].map(n=>{
-      const a = layananAvg(n);
-      if(!a) return null;
-      const emp = LAYANAN_EMPLOYEES.CS.includes(n) ? "CS" : "Teller";
-      return {
-        "Nama": n, "Peran": emp, "Hari Lapor": a.count,
-        "Rata-rata Nasabah/Hari": Number(a.nasabah.toFixed(1)),
-        "Rata-rata Waktu Antrian (mnt)": Number(a.antrian.toFixed(1)),
-        "Rata-rata Waktu Transaksi (mnt)": Number(a.transaksi.toFixed(1)),
-      };
-    }).filter(Boolean).sort((a,b)=>b["Rata-rata Nasabah/Hari"]-a["Rata-rata Nasabah/Hari"]);
-    const wsLay = XLSX.utils.json_to_sheet(layananRows.length?layananRows:[{"Info":"Belum ada data layanan bulan ini"}]);
-    styleSheet(wsLay, [26,10,12,20,22,22]);
-    XLSX.utils.book_append_sheet(wb, wsLay, "Layanan Nasabah");
-
-    // Sheet 5: Leaderboard Support (penilaian kinerja)
-    const penRows = SUPPORT_TARGETS.map(s=>{
-      const a = penilaianAvg(s.name);
-      if(!a) return null;
-      return {"Nama": s.name, "Kategori": s.kategori, "Jumlah Penilaian": a.count, "Rata-rata Skor": Number(a.avg.toFixed(1)), "Status": statusFor(a.avg/100).label};
-    }).filter(Boolean).sort((a,b)=>b["Rata-rata Skor"]-a["Rata-rata Skor"]);
-    const wsPen = XLSX.utils.json_to_sheet(penRows.length?penRows:[{"Info":"Belum ada data penilaian bulan ini"}]);
-    styleSheet(wsPen, [26,26,16,14,14]);
-    XLSX.utils.book_append_sheet(wb, wsPen, "Support");
-
-    // Sheet 6: Detail Laporan Akuisisi bulan berjalan
-    const marked = state._dupMarked || markDuplicates(state.reports);
-    const detailRows = marked.map(r=>{
-      const emp = empByName(r.employee);
-      return {
-        "Tanggal": r.date, "Nama": r.employee, "Tim": emp?emp.team:"",
-        "Produk": r.product, "Jumlah": r.amount, "Keterangan": r.note||"",
-        "Status": r.status==='approved'?'Disetujui':r.status==='rejected'?'Ditolak':'Menunggu',
-        "Duplikat": r.isDuplicate?"YA":"TIDAK"
-      };
-    });
-    const wsDetail = XLSX.utils.json_to_sheet(detailRows.length?detailRows:[{"Info":"Belum ada laporan bulan ini"}]);
-    styleSheet(wsDetail, [12,26,14,14,10,30,12,10]);
-    XLSX.utils.book_append_sheet(wb, wsDetail, "Detail Laporan");
-
-    // Sheet 7: Leads
-    const leadRows = state.leads.map(l=>({
-      "Produk": l.product, "Nama Potensi": l.name, "Kontak": l.contact,
-      "Status Follow Up": l.followedBy ? `Selesai oleh ${l.followedBy}` : "Belum",
-      "Tanggal Masuk": l.uploadedAt ? new Date(l.uploadedAt).toLocaleDateString('id-ID') : "-"
-    }));
-    const wsLeads = XLSX.utils.json_to_sheet(leadRows.length?leadRows:[{"Info":"Belum ada data leads"}]);
-    styleSheet(wsLeads, [18,26,20,26,16]);
-    XLSX.utils.book_append_sheet(wb, wsLeads, "Leads");
-
-    XLSX.writeFile(wb, `Laporan_Branch_Performance_${state.month}.xlsx`);
-    toast("File Excel lengkap berhasil diunduh (8 sheet)", "📊");
-    playSound("drum");
-  }catch(err){
-    toast("Gagal membuat Excel, coba lagi", "⚠️");
-  }
 }
 
 
@@ -5400,14 +5182,13 @@ async function doLoginFlow(nip){
     console.error("Gagal render dashboard:", err);
     if(window.__reportError) window.__reportError("Gagal render dashboard: " + (err && (err.stack||err.message) || err));
   }
-  // Beri browser satu frame penuh untuk selesai melayout sebelum memotong layar login,
-  // supaya perpindahannya bersih tanpa kilatan.
+  // Beri browser SATU frame untuk selesai melayout sebelum memotong layar
+  // login (dipersingkat dari sebelumnya 2-3 frame + transisi 0.35s, supaya
+  // perpindahannya terasa lebih cepat/tidak nge-lag terutama di HP).
   requestAnimationFrame(()=>{
-    requestAnimationFrame(()=>{
-      loginScreen.style.display = "none";
-      mainWrap.style.transition = "opacity .35s ease";
-      requestAnimationFrame(()=>{ mainWrap.style.opacity = "1"; });
-    });
+    loginScreen.style.display = "none";
+    mainWrap.style.transition = "opacity .2s ease";
+    mainWrap.style.opacity = "1";
   });
   playSound("welcome");
   if(window.__storageErrors && window.__storageErrors.length){
@@ -5419,24 +5200,143 @@ async function doLoginFlow(nip){
   } else if(state.role==="admin"){ toast("Login berhasil — akses Admin aktif", "🛡️"); }
   else{ toast(`Selamat datang, NIP ${nip}`, "👋"); }
 }
+let loginStage = "nip"; // "nip" | "password" | "setup" | "forgot-request" | "forgot-verify"
+let loginPendingNip = "";
+function resetLoginStage(){
+  loginStage = "nip";
+  loginPendingNip = "";
+  const nipField = document.getElementById("loginNIP");
+  nipField.disabled = false;
+  document.getElementById("loginStep2").innerHTML = "";
+  document.getElementById("loginSubmitBtn").textContent = "🔐 Masuk ke Dashboard";
+  document.getElementById("loginFootHint").textContent = "Tulis NIP Anda untuk masuk. Akses Admin otomatis aktif untuk NIP terdaftar.";
+}
+function startForgotFlow(){
+  loginStage = "forgot-request";
+  document.getElementById("loginStep2").innerHTML = `
+    <p class="hint" style="margin:6px 0 10px">Kode reset akan dikirim ke email yang terdaftar untuk NIP ${loginPendingNip}.</p>
+  `;
+  document.getElementById("loginSubmitBtn").textContent = "📧 Kirim Kode Reset";
+}
 document.getElementById("loginForm").onsubmit = async (e)=>{
   e.preventDefault();
   if(loginBusy) return;
-  const nip = sanitizeNIP(document.getElementById("loginNIP").value);
-  if(!nip){ toast("Silakan tulis NIP Anda (hanya angka)", "⚠️"); return; }
   loginBusy = true;
-  const btn = e.target.querySelector("button[type=submit]");
+  const btn = document.getElementById("loginSubmitBtn");
   const origText = btn.textContent;
   btn.disabled = true; btn.style.opacity = "0.7"; btn.textContent = "Memuat...";
   try{
-    await doLoginFlow(nip);
+    if(loginStage === "nip"){
+      const nip = sanitizeNIP(document.getElementById("loginNIP").value);
+      if(!nip){ toast("Silakan tulis NIP Anda (hanya angka)", "⚠️"); return; }
+      const loaded = await loadConfig();
+      if(!loaded){ toast("Gagal memeriksa akses, coba lagi", "⚠️"); return; }
+      const isAdmin = CFG.adminNips.includes(nip);
+      if(!isAdmin){
+        await doLoginFlow(nip);
+        return;
+      }
+      loginPendingNip = nip;
+      document.getElementById("loginNIP").disabled = true;
+      const auth = (CFG.adminAuth||{})[nip];
+      if(auth && auth.passwordHash){
+        loginStage = "password";
+        document.getElementById("loginStep2").innerHTML = `
+          <div class="field"><label>Password Admin</label><input type="password" id="loginPassword" autocomplete="current-password" required></div>
+          <p style="text-align:right;margin:-6px 0 4px"><a href="#" id="forgotPasswordLink" style="color:var(--gold-300);font-size:12px">Lupa password?</a></p>
+        `;
+        document.getElementById("loginFootHint").textContent = `NIP ${nip} terdaftar sebagai Admin — masukkan password.`;
+        btn.textContent = "🔐 Masuk sebagai Admin";
+        document.getElementById("forgotPasswordLink").onclick = (ev)=>{ ev.preventDefault(); startForgotFlow(); };
+        document.getElementById("loginPassword").focus();
+      } else {
+        loginStage = "setup";
+        document.getElementById("loginStep2").innerHTML = `
+          <p class="hint" style="margin:6px 0 10px">NIP ini terdaftar sebagai Admin. Buat email &amp; password untuk mengamankan akses Admin.</p>
+          <div class="field"><label>Email (untuk reset password)</label><input type="email" id="setupEmail" required></div>
+          <div class="field"><label>Buat Password (min. 6 karakter)</label><input type="password" id="setupPassword" minlength="6" required></div>
+          <div class="field"><label>Ulangi Password</label><input type="password" id="setupPasswordConfirm" minlength="6" required></div>
+        `;
+        document.getElementById("loginFootHint").textContent = "Ini pertama kalinya NIP ini login sebagai Admin.";
+        btn.textContent = "💾 Simpan & Masuk sebagai Admin";
+        document.getElementById("setupEmail").focus();
+      }
+      return;
+    }
+    if(loginStage === "password"){
+      const pw = document.getElementById("loginPassword").value;
+      const hash = await sha256Hex(pw);
+      const auth = (CFG.adminAuth||{})[loginPendingNip];
+      if(!auth || hash !== auth.passwordHash){ toast("Password salah, coba lagi", "⚠️"); return; }
+      await doLoginFlow(loginPendingNip);
+      resetLoginStage();
+      return;
+    }
+    if(loginStage === "setup"){
+      const email = document.getElementById("setupEmail").value.trim();
+      const pw = document.getElementById("setupPassword").value;
+      const pw2 = document.getElementById("setupPasswordConfirm").value;
+      if(!email || !/\S+@\S+\.\S+/.test(email)){ toast("Tulis email yang valid", "⚠️"); return; }
+      if(pw.length < 6){ toast("Password minimal 6 karakter", "⚠️"); return; }
+      if(pw !== pw2){ toast("Password tidak sama, coba lagi", "⚠️"); return; }
+      const hash = await sha256Hex(pw);
+      const ok = await mutateConfigAndSave((cfg)=>{
+        if(!cfg.adminAuth) cfg.adminAuth = {};
+        cfg.adminAuth[loginPendingNip] = { email, passwordHash: hash };
+      });
+      if(!ok){ toast("Gagal menyimpan password, coba lagi", "⚠️"); return; }
+      await doLoginFlow(loginPendingNip);
+      resetLoginStage();
+      return;
+    }
+    if(loginStage === "forgot-request"){
+      const auth = (CFG.adminAuth||{})[loginPendingNip];
+      if(!auth || !auth.email){ toast("NIP ini belum punya email terdaftar untuk reset otomatis", "⚠️"); return; }
+      const code = genResetCode();
+      const ok = await mutateConfigAndSave((cfg)=>{
+        cfg.adminAuth[loginPendingNip].resetCode = code;
+        cfg.adminAuth[loginPendingNip].resetExpiry = Date.now() + 15*60*1000;
+      });
+      if(!ok){ toast("Gagal memproses, coba lagi", "⚠️"); return; }
+      const sent = await sendResetEmail(auth.email, `Kode Reset Password Admin — ${CFG.brandTitle}`,
+        `Kode reset password Admin Anda: ${code}\n\nKode ini berlaku 15 menit. Kalau Anda tidak meminta ini, abaikan email ini.`);
+      if(!sent){ toast("Gagal mengirim email, coba lagi", "⚠️"); return; }
+      toast(`Kode reset sudah dikirim ke ${auth.email}`, "📧");
+      loginStage = "forgot-verify";
+      document.getElementById("loginStep2").innerHTML = `
+        <div class="field"><label>Kode dari Email (6 digit)</label><input type="text" id="resetCodeInput" inputmode="numeric" maxlength="6" required></div>
+        <div class="field"><label>Password Baru (min. 6 karakter)</label><input type="password" id="newPasswordInput" minlength="6" required></div>
+      `;
+      btn.textContent = "✅ Reset Password";
+      document.getElementById("resetCodeInput").focus();
+      return;
+    }
+    if(loginStage === "forgot-verify"){
+      const code = document.getElementById("resetCodeInput").value.trim();
+      const newPw = document.getElementById("newPasswordInput").value;
+      const auth = (CFG.adminAuth||{})[loginPendingNip];
+      if(!auth || !auth.resetCode || auth.resetCode !== code){ toast("Kode salah", "⚠️"); return; }
+      if(Date.now() > (auth.resetExpiry||0)){ toast("Kode sudah kedaluwarsa, minta kode baru", "⚠️"); return; }
+      if(newPw.length < 6){ toast("Password minimal 6 karakter", "⚠️"); return; }
+      const hash = await sha256Hex(newPw);
+      const ok = await mutateConfigAndSave((cfg)=>{
+        cfg.adminAuth[loginPendingNip].passwordHash = hash;
+        cfg.adminAuth[loginPendingNip].resetCode = null;
+        cfg.adminAuth[loginPendingNip].resetExpiry = null;
+      });
+      if(!ok){ toast("Gagal menyimpan password baru, coba lagi", "⚠️"); return; }
+      toast("Password berhasil direset, silakan masuk", "✅");
+      resetLoginStage();
+      return;
+    }
   }catch(err){
     console.error("Login gagal:", err);
     if(window.__reportError) window.__reportError("Login gagal: " + (err && (err.stack||err.message) || err));
     toast("Terjadi kendala saat login, silakan coba lagi", "⚠️");
   } finally {
     loginBusy = false;
-    btn.disabled = false; btn.style.opacity = "1"; btn.textContent = origText;
+    btn.disabled = false; btn.style.opacity = "1";
+    if(loginStage === "nip") btn.textContent = origText;
   }
 };
 function doLogout(){
@@ -5448,6 +5348,7 @@ function doLogout(){
   loginScreen.classList.remove("login-freeze");
   loginScreen.style.display = "flex";
   loginScreen.style.opacity = "1";
+  resetLoginStage();
   document.getElementById("loginNIP").value = "";
   document.getElementById("loginNIP").focus();
 }
@@ -5456,10 +5357,6 @@ function doLogout(){
    INIT
    ============================================================ */
 (function init(){
-  document.getElementById("loginLogoImg").src = LOGO_MANDIRI_B64;
-  document.getElementById("headerLogoImg").src = LOGO_MANDIRI_B64;
-  document.getElementById("loginLivinImg").src = LOGO_LIVIN_B64;
-  document.getElementById("loginKopraImg").src = LOGO_KOPRA_B64;
   const loginNIPEl = document.getElementById("loginNIP");
   loginNIPEl.focus();
   // Di Android, keyboard virtual yang muncul/hilang saat mengetik NIP memicu

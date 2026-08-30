@@ -1115,7 +1115,29 @@ async function ensureXLSX(){
 }
 
 /* ---- primitif mentah: baca/simpan/hapus SATU baris (satu key persis) ---- */
+/* Cache sementara berisi hasil "prefetch" satu kali di awal login (lihat
+   preloginBatchFetch) — kalau key yang dicari sudah ada di sini, fetchRaw
+   TIDAK perlu bikin request jaringan baru sama sekali. Ini yang membuat
+   proses login jadi jauh lebih cepat: alih-alih ±16 request terpisah ke
+   Apps Script (yang masing-masing punya jeda/overhead sendiri), semuanya
+   digabung jadi SATU request di awal. */
+let __loginPrefetchCache = null;
+async function preloginBatchFetch(keys){
+  if(!APPS_SCRIPT_URL) return;
+  try{
+    const res = await fetch(`${APPS_SCRIPT_URL}?keys=${encodeURIComponent(keys.join(","))}`);
+    const data = await res.json();
+    __loginPrefetchCache = new Map(Object.entries(data.values || {}));
+  }catch(e){
+    // Gagal prefetch -- tidak apa-apa, biarkan null supaya fetchRaw() jalan
+    // seperti biasa satu per satu (sedikit lebih lambat, tapi tetap benar).
+    __loginPrefetchCache = null;
+  }
+}
 async function fetchRaw(key){
+  if(__loginPrefetchCache && __loginPrefetchCache.has(key)){
+    return __loginPrefetchCache.get(key);
+  }
   if(APPS_SCRIPT_URL){
     try{
       const res = await fetch(`${APPS_SCRIPT_URL}?key=${encodeURIComponent(key)}`);
@@ -3948,6 +3970,14 @@ function renderAdmin(){
       <div id="layananLayoutList"></div>
     </div>
 
+    <div class="card glow" style="margin-bottom:18px">
+      <div class="orb o-blue"></div>
+      <h3 class="sub">🔍 Cek Data Tersimpan di Server</h3>
+      <p class="hint" style="margin-bottom:14px">Lihat langsung semua data yang benar-benar tersimpan di Google Sheet Anda saat ini — berguna untuk memastikan tidak ada data yang hilang atau tersesat.</p>
+      <button class="btn ghost sm" id="diagCheckBtn">🔎 Cek Sekarang</button>
+      <div id="diagResultBox" style="margin-top:14px"></div>
+    </div>
+
     <div class="card glow" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div>
         <h3 class="sub" style="margin:0">Tarik Data Akuisisi</h3>
@@ -3975,6 +4005,7 @@ function renderAdmin(){
   drawLeaderboardLayoutList();
   drawLayananLayoutList();
   wireMasterDataForms();
+  document.getElementById("diagCheckBtn").onclick = checkStoredData;
   document.getElementById("addAdminForm").onsubmit = async (e)=>{
     e.preventDefault();
     const raw = document.getElementById("newAdminNip").value;
@@ -4193,6 +4224,48 @@ function drawTeamMgmtList(){
 }
 
 /* ---- Kelola Tata Letak Halaman (generik — dipakai untuk Dashboard, Pipeline Dana, dst.) ---- */
+/* Diagnostik: tampilkan ringkasan SEMUA data yang benar-benar tersimpan di
+   Google Sheet (KV_STORE) saat ini, dikelompokkan per jenis, supaya Admin
+   bisa memastikan sendiri data karyawan/admin benar-benar tersimpan dan
+   tidak ada yang hilang atau tersesat di baris format lama. */
+async function checkStoredData(){
+  const box = document.getElementById("diagResultBox");
+  box.innerHTML = `<p class="hint">Memeriksa server...</p>`;
+  try{
+    const res = await fetch(`${APPS_SCRIPT_URL}?listkeys=1`);
+    const data = await res.json();
+    const keys = data.keys || [];
+    if(!keys.length){
+      box.innerHTML = `<p class="hint" style="color:var(--danger)">Tidak ditemukan data apa pun di server (sheet KV_STORE kosong).</p>`;
+      return;
+    }
+    const groups = {};
+    let legacyCount = 0;
+    keys.forEach(k=>{
+      const prefix = k.key.split(":")[0];
+      if(!k.key.includes("::c")) legacyCount++;
+      if(!groups[prefix]) groups[prefix] = [];
+      groups[prefix].push(k);
+    });
+    const rows = Object.keys(groups).sort().map(prefix=>{
+      const items = groups[prefix];
+      const totalChars = items.reduce((s,i)=>s+i.chars,0);
+      const lastMod = items.reduce((latest,i)=> (i.modified||"") > latest ? i.modified : latest, "");
+      return `<tr><td>${prefix}</td><td>${items.length} baris</td><td>${totalChars.toLocaleString("id-ID")} karakter</td><td>${lastMod ? new Date(lastMod).toLocaleString("id-ID") : "-"}</td></tr>`;
+    }).join("");
+    box.innerHTML = `
+      <p class="hint" style="margin-bottom:10px">Total <b>${keys.length}</b> baris data ditemukan di server saat ini${legacyCount ? ` (<span style="color:var(--warn)">${legacyCount} di antaranya format lama</span>)` : ""}:</p>
+      <div style="overflow-x:auto"><table class="data">
+        <thead><tr><th>Jenis Data (awalan key)</th><th>Jumlah Baris</th><th>Total Ukuran</th><th>Terakhir Diubah</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <p class="hint" style="margin-top:10px;font-size:11px">Kalau ada jenis data yang menurut Anda seharusnya jauh lebih banyak, kemungkinan besar itu benar-benar belum pernah tersimpan (mis. sempat gagal di masa lalu) — data yang sudah tersimpan di sini sudah pasti aman.</p>
+    `;
+  }catch(e){
+    box.innerHTML = `<p class="hint" style="color:var(--danger)">Gagal memeriksa: ${e.message}</p>`;
+  }
+}
+
 const SECTION_LABELS = {
   dashboard: {
     kpi: "📊 Ringkasan Cabang (kartu KPI)",
@@ -5272,6 +5345,21 @@ async function doLoginFlow(nip){
   // dua lapisan animasi (login + dashboard) yang di-composite bersamaan — itulah
   // penyebab bug "kedap-kedip" di desktop (GPU harus render 2 layar animasi sekaligus).
   loginScreen.classList.add("login-freeze");
+  // PERCEPAT LOGIN: gabungkan SEMUA key yang dibutuhkan (config + 7 jenis
+  // data bulan ini) jadi SATU request batch di awal, alih-alih ±16 request
+  // terpisah — Apps Script punya jeda/overhead per-request yang cukup
+  // terasa, jadi ini yang paling besar pengaruhnya ke kecepatan login.
+  const rMonth = keyReports(state.month), lMonth = keyLayanan(state.month), pMonth = keyPenilaian(state.month);
+  await preloginBatchFetch([
+    KEY_CONFIG, `${KEY_CONFIG}::c0`,
+    rMonth, `${rMonth}::c0`,
+    lMonth, `${lMonth}::c0`,
+    pMonth, `${pMonth}::c0`,
+    KEY_LEADS, `${KEY_LEADS}::c0`,
+    KEY_INFO, `${KEY_INFO}::c0`,
+    KEY_PIPELINE, `${KEY_PIPELINE}::c0`,
+    KEY_MARKETING, `${KEY_MARKETING}::c0`,
+  ]);
   // Jaring pengaman: kalau memuat data macet (mis. koneksi lambat / backend
   // Apps Script tidak merespons), tetap masuk ke dashboard setelah 8 detik
   // alih-alih membuat pengguna terjebak selamanya di layar login.
@@ -5284,6 +5372,10 @@ async function doLoginFlow(nip){
     console.error("Gagal memuat data awal:", err);
     if(window.__reportError) window.__reportError("Gagal memuat data awal: " + (err && (err.stack||err.message) || err));
   }
+  // Cache prefetch cuma dipakai sekali di awal login -- kosongkan lagi
+  // supaya semua permintaan SETELAH ini (simpan, ganti bulan, dll) selalu
+  // mengambil data paling baru langsung dari server, bukan dari cache lama.
+  __loginPrefetchCache = null;
   // Peran (admin/karyawan) baru bisa dipastikan SETELAH konfigurasi (daftar
   // NIP admin) selesai dimuat, supaya perubahan daftar admin oleh Admin lain
   // langsung berlaku untuk semua orang.

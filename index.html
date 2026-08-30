@@ -694,7 +694,7 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
         <button id="roleKaryawan" class="active">Karyawan</button>
         <button id="roleAdmin">Admin</button>
       </div>
-      <button class="iconbtn" id="pagePdfBtn" title="Unduh PDF Halaman Ini">📄</button>
+      <button class="iconbtn" id="pagePdfBtn" title="Unduh PDF khusus halaman ini saja" style="width:auto;padding:0 12px;gap:6px;font-size:12.5px;font-weight:800;white-space:nowrap">📄 Halaman Ini</button>
       <button class="iconbtn" id="musicBtn" title="Musik semangat">🔊</button>
       <button class="iconbtn" id="logoutBtn" title="Keluar">🚪</button>
     </div>
@@ -720,11 +720,11 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
 
   <div class="card glow" style="margin-top:26px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
     <div>
-      <h3 class="sub" style="margin:0">Laporan Performa Lengkap</h3>
-      <p class="hint">Unduh laporan detail performa cabang bulan <span id="pdfMonthLabel">Agustus 2026</span> — rincian per produk, per karyawan, per tim, dan daftar gap yang belum tercapai.</p>
+      <h3 class="sub" style="margin:0">Laporan Performa Lengkap (Semua Halaman)</h3>
+      <p class="hint">Gabungan SELURUH halaman jadi satu file untuk bulan <span id="pdfMonthLabel">Agustus 2026</span> — rincian per produk, per karyawan, per tim, Pipeline Dana, Layanan &amp; Support, dan daftar gap yang belum tercapai. <b>Kalau hanya perlu satu halaman saja</b> (mis. cuma Pipeline Dana), gunakan tombol "📄 Halaman Ini" di pojok kanan atas pada halaman yang bersangkutan.</p>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn primary" id="pdfBtn">📄 PDF Lengkap</button>
+      <button class="btn primary" id="pdfBtn">📄 PDF Lengkap (Semua Halaman)</button>
     </div>
   </div>
 
@@ -3350,7 +3350,7 @@ function pipelineCardHTML(label, icon, stats, isAdmin, isAggregate){
         <span style="font-size:11.5px;color:var(--ink-400)">Target</span>
         <b>${fmtJuta(target)}</b>
       </div>
-      ${pipelineSchemeBlockHTML("Laporan Realita", "Dari Realisasi saja (tanpa potensi)", "📊", realita, target, "var(--ink-200)")}
+      ${pipelineSchemeBlockHTML("Laporan Realisasi", "Dari Realisasi saja (tanpa potensi)", "📊", realita, target, "var(--ink-200)")}
       ${pipelineSchemeBlockHTML("Laporan Komitmen", "Dari Realisasi + Total Potensi", "🔮", komitmen, target, "var(--gold-300)")}
       ` : `<div class="hint" style="font-size:11px">Target belum diatur Admin</div>`}
     </div>`;
@@ -4835,13 +4835,13 @@ function pdfDashboardDetail(){
   p.setY(p.getY()+6);
 
   p.sectionTitle("Pencapaian per Tim");
-  const teamCols = [{label:"TIM",w:200},{label:"JML KARYAWAN",w:120,align:"right"},{label:"RATA² CAPAIAN",w:110,align:"right"},{label:"STATUS",w:100}];
+  const teamCols = [{label:"TIM",w:180},{label:"JML KARYAWAN",w:110,align:"right"},{label:"RATA² CAPAIAN",w:105,align:"right"},{label:"STATUS",w:95}];
   p.tableHeader(teamCols);
   CFG.teams.forEach((team,i)=>{
     const avg = teamAverage(team);
     const cnt = CFG.employees.filter(e=>e.team===team).length;
     const col = pdfAchievementColor(avg*100);
-    p.tableRow(teamCols, [team, cnt, pctStr(avg), statusFor(avg).label], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,col,col]});
+    p.tableRow(teamCols, [team, cnt, pctStr(avg), statusFor(avg).label], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,col,col], dots:{2:col}});
   });
   p.setY(p.getY()+10);
 
@@ -4853,14 +4853,14 @@ function pdfDashboardDetail(){
     const champ = teamStatsList[0];
     const hasChamp = champ && champ.overall>0;
     p.tableRow(champCols, [team, hasChamp ? champ.name : "Belum ada capaian", hasChamp ? pctStr(champ.overall) : "-"],
-      {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK, hasChamp?pdfAchievementColor(champ.overall*100):[130,130,130]]});
+      {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK, hasChamp?pdfAchievementColor(champ.overall*100):[130,130,130]], dots: hasChamp?{2:pdfAchievementColor(champ.overall*100)}:null});
   });
   p.setY(p.getY()+10);
 
   p.sectionTitle("Top 10 Karyawan — Semua Tim");
   const topCols = [{label:"#",w:40},{label:"NAMA",w:220},{label:"TIM",w:150},{label:"CAPAIAN",w:80,align:"right"}];
   p.tableHeader(topCols);
-  stats.slice(0,10).forEach((s,i)=> p.tableRow(topCols, [`${i+1}`, s.name, s.team, pctStr(s.overall)], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK, pdfAchievementColor(s.overall*100)]}));
+  stats.slice(0,10).forEach((s,i)=>{ const col=pdfAchievementColor(s.overall*100); p.tableRow(topCols, [`${i+1}`, s.name, s.team, pctStr(s.overall)], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK, col], dots:{3:col}}); });
   p.setY(p.getY()+10);
 
   p.sectionTitle("Akuisisi per Produk (Cabang)");
@@ -4870,7 +4870,8 @@ function pdfDashboardDetail(){
     const totalUnit = state.reports.filter(r=>r.status==='approved' && r.product===prod).reduce((s,r)=>s+Number(r.amount||0),0);
     const totalTarget = CFG.employees.reduce((s,e)=>s+Number((e.targets&&e.targets[prod])||0),0);
     const pct = totalTarget>0 ? totalUnit/totalTarget : 0;
-    p.tableRow(prodCols, [prod, `${totalUnit} / ${totalTarget} Account`, totalTarget, pctStr(pct)], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK, totalTarget>0?pdfAchievementColor(pct*100):[130,130,130]]});
+    const prodCol = totalTarget>0?pdfAchievementColor(pct*100):[130,130,130];
+    p.tableRow(prodCols, [prod, `${totalUnit} / ${totalTarget} Account`, totalTarget, pctStr(pct)], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK, prodCol], dots: totalTarget>0?{3:prodCol}:null});
   });
   p.finish(`Detail_Dashboard_${state.month}.pdf`);
   toast("PDF detail Dashboard berhasil diunduh", "📄");
@@ -4902,21 +4903,21 @@ function pdfLeaderboardDetail(){
   const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Leaderboard — ${monthLabel()}`);
   p.newPage(`Leaderboard Akuisisi — ${scope==="all"?"Semua Karyawan":scope} — ${monthLabel()}`);
   p.sectionTitle("Peringkat per Tim");
-  const teamCols = [{label:"#",w:40},{label:"TIM",w:220},{label:"JML KARYAWAN",w:130,align:"right"},{label:"RATA² CAPAIAN",w:110,align:"right"},{label:"STATUS",w:90}];
+  const teamCols = [{label:"#",w:32},{label:"TIM",w:180},{label:"JML KARYAWAN",w:105,align:"right"},{label:"RATA² CAPAIAN",w:100,align:"right"},{label:"STATUS",w:75}];
   p.tableHeader(teamCols);
   const teamsToShow = scope==="all" ? CFG.teams : [scope];
   const teamRanked = teamsToShow.map(t=>({team:t, avg:teamAverage(t), cnt:CFG.employees.filter(e=>e.team===t).length})).sort((a,b)=>b.avg-a.avg);
   teamRanked.forEach((t,i)=>{
     const col = pdfAchievementColor(t.avg*100);
-    p.tableRow(teamCols, [`${i+1}`, t.team, t.cnt, pctStr(t.avg), statusFor(t.avg).label], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col,col]});
+    p.tableRow(teamCols, [`${i+1}`, t.team, t.cnt, pctStr(t.avg), statusFor(t.avg).label], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col,col], dots:{3:col}});
   });
   p.setY(p.getY()+10);
   p.sectionTitle(`Peringkat per Karyawan — ${scope==="all"?"Semua Tim":scope}`);
-  const cols = [{label:"#",w:40},{label:"NAMA",w:220},{label:"TIM",w:150},{label:"CAPAIAN",w:80,align:"right"},{label:"STATUS",w:70}];
+  const cols = [{label:"#",w:32},{label:"NAMA",w:195},{label:"TIM",w:130},{label:"CAPAIAN",w:75,align:"right"},{label:"STATUS",w:65}];
   p.tableHeader(cols);
   list.forEach((s,i)=>{
     const col = pdfAchievementColor(s.overall*100);
-    p.tableRow(cols, [`${i+1}`, s.name, s.team, pctStr(s.overall), statusFor(s.overall).label], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col,col]});
+    p.tableRow(cols, [`${i+1}`, s.name, s.team, pctStr(s.overall), statusFor(s.overall).label], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col,col], dots:{3:col}});
   });
   p.finish(`Detail_Leaderboard_${state.month}.pdf`);
   toast("PDF detail Leaderboard berhasil diunduh", "📄");
@@ -4925,13 +4926,40 @@ function pdfLeaderboardDetail(){
 function pdfLayananDetail(){
   const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Layanan & Support — ${monthLabel()}`);
   p.newPage(`Detail Layanan Nasabah & Support — ${monthLabel()}`);
-  p.sectionTitle("Layanan Nasabah — Rata-rata Bulanan (CS & Teller)");
-  const lCols = [{label:"NAMA",w:150},{label:"HARI LAPOR",w:70,align:"right"},{label:"RATA² NASABAH",w:90,align:"right"},{label:"RATA² ANTRIAN",w:90,align:"right"},{label:"RATA² TRANSAKSI",w:90,align:"right"}];
-  p.tableHeader(lCols);
-  const layananRows = [...LAYANAN_EMPLOYEES.CS, ...LAYANAN_EMPLOYEES.TELLER].map(n=>({n,a:layananAvg(n)})).filter(r=>r.a).sort((a,b)=>b.a.nasabah-a.a.nasabah);
-  if(!layananRows.length){ p.paragraph("Belum ada input layanan bulan ini.", {size:9, color:[130,130,130]}); }
-  layananRows.forEach((r,i)=> p.tableRow(lCols, [r.n, r.a.count, r.a.nasabah.toFixed(1), r.a.antrian.toFixed(1)+" mnt", r.a.transaksi.toFixed(1)+" mnt"], {zebra:i%2===0}));
+
+  const csRows = LAYANAN_EMPLOYEES.CS.map(n=>({n,a:layananAvg(n)})).filter(r=>r.a).sort((a,b)=>b.a.nasabah-a.a.nasabah);
+  const tellerRows = LAYANAN_EMPLOYEES.TELLER.map(n=>({n,a:layananAvg(n)})).filter(r=>r.a).sort((a,b)=>b.a.nasabah-a.a.nasabah);
+  const penRows = SUPPORT_TARGETS.map(s=>({n:s.name,kat:s.kategori,a:penilaianAvg(s.name)})).filter(r=>r.a).sort((a,b)=>b.a.avg-a.a.avg);
+  const bestCS = csRows[0], bestTeller = tellerRows[0], bestSupport = penRows[0];
+
+  p.sectionTitle("Ikhtisar — Peraih Terbaik Bulan Ini");
+  const ikhtisarCols = [{label:"KATEGORI",w:150},{label:"NAMA TERBAIK",w:200},{label:"PENCAPAIAN",w:110,align:"right"}];
+  p.tableHeader(ikhtisarCols);
+  p.tableRow(ikhtisarCols, ["CS Terbaik", bestCS?bestCS.n:"—", bestCS?bestCS.a.nasabah.toFixed(1)+" nasabah/hari":"-"], {zebra:true, dots:{0:bestCS?PDF_GREEN:[180,180,180]}});
+  p.tableRow(ikhtisarCols, ["Teller Terbaik", bestTeller?bestTeller.n:"—", bestTeller?bestTeller.a.nasabah.toFixed(1)+" nasabah/hari":"-"], {zebra:false, dots:{0:bestTeller?PDF_GREEN:[180,180,180]}});
+  p.tableRow(ikhtisarCols, ["Support Terbaik", bestSupport?bestSupport.n:"—", bestSupport?bestSupport.a.avg.toFixed(0)+"/100":"-"], {zebra:true, dots:{0:bestSupport?PDF_GREEN:[180,180,180]}});
   p.setY(p.getY()+10);
+
+  function drawLayananTable(title, rows){
+    p.sectionTitle(title);
+    const lCols = [{label:"NAMA",w:150},{label:"HARI LAPOR",w:65,align:"right"},{label:"RATA² NASABAH",w:95,align:"right"},{label:"RATA² ANTRIAN",w:90,align:"right"},{label:"RATA² TRANSAKSI",w:95,align:"right"}];
+    p.tableHeader(lCols);
+    if(!rows.length){ p.paragraph("Belum ada input layanan bulan ini.", {size:9, color:[130,130,130]}); return; }
+    const avgAntrian = rows.reduce((s,r)=>s+r.a.antrian,0)/rows.length;
+    const avgTransaksi = rows.reduce((s,r)=>s+r.a.transaksi,0)/rows.length;
+    rows.forEach((r,i)=>{
+      // Nasabah: lebih tinggi lebih baik. Antrian/Transaksi: lebih RENDAH lebih baik (lebih cepat).
+      const antrianColor = r.a.antrian <= avgAntrian ? PDF_GREEN : PDF_AMBER;
+      const transaksiColor = r.a.transaksi <= avgTransaksi ? PDF_GREEN : PDF_AMBER;
+      p.tableRow(lCols, [r.n, r.a.count, r.a.nasabah.toFixed(1), r.a.antrian.toFixed(1)+" mnt", r.a.transaksi.toFixed(1)+" mnt"],
+        {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,antrianColor,transaksiColor], dots:{3:antrianColor, 4:transaksiColor}});
+    });
+    p.setY(p.getY()+4);
+    p.paragraph("Titik hijau = lebih cepat dari rata-rata tim (lebih baik); titik kuning = lebih lambat dari rata-rata.", {size:7.5, color:[130,130,130]});
+    p.setY(p.getY()+6);
+  }
+  drawLayananTable("Layanan Nasabah CS — Rata-rata Bulanan", csRows);
+  drawLayananTable("Layanan Nasabah Teller — Rata-rata Bulanan", tellerRows);
 
   p.sectionTitle("Detail Input Layanan — Semua Entri Harian");
   const dCols = [{label:"TGL",w:60},{label:"NAMA",w:125},{label:"NASABAH",w:80,align:"right"},{label:"ANTRIAN",w:80,align:"right"},{label:"TRANSAKSI",w:80,align:"right"}];
@@ -4943,11 +4971,13 @@ function pdfLayananDetail(){
   p.setY(p.getY()+10);
 
   p.sectionTitle("Support — Rata-rata Penilaian Kinerja");
-  const pCols = [{label:"NAMA",w:170},{label:"KATEGORI",w:180},{label:"JML PENILAIAN",w:90,align:"right"},{label:"RATA² SKOR",w:70,align:"right"}];
+  const pCols = [{label:"NAMA",w:170},{label:"KATEGORI",w:150},{label:"JML PENILAIAN",w:90,align:"right"},{label:"RATA² SKOR",w:70,align:"right"}];
   p.tableHeader(pCols);
-  const penRows = SUPPORT_TARGETS.map(s=>({n:s.name,kat:s.kategori,a:penilaianAvg(s.name)})).filter(r=>r.a).sort((a,b)=>b.a.avg-a.a.avg);
   if(!penRows.length){ p.paragraph("Belum ada penilaian bulan ini.", {size:9, color:[130,130,130]}); }
-  penRows.forEach((r,i)=> p.tableRow(pCols, [r.n, r.kat, r.a.count, r.a.avg.toFixed(0)+"/100"], {zebra:i%2===0}));
+  penRows.forEach((r,i)=>{
+    const col = pdfAchievementColor(r.a.avg);
+    p.tableRow(pCols, [r.n, r.kat, r.a.count, r.a.avg.toFixed(0)+"/100"], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots:{3:col}});
+  });
   p.setY(p.getY()+10);
 
   p.sectionTitle("Detail Laporan Penilaian — Semua Entri");
@@ -4985,13 +5015,31 @@ function pdfMarketingDetail(){
   const cnt = (h)=> all.filter(m=>m.hasil===h).length;
   p.paragraph(`Total Kunjungan: ${all.length}   |   FU: ${cnt("FU")}   |   Deal: ${cnt("Deal")}   |   Reject: ${cnt("Reject")}`, {bold:true});
   p.setY(p.getY()+8);
+
+  p.sectionTitle("Ringkasan per PIC — Tingkat Keberhasilan");
+  const picCols = [{label:"PIC",w:150},{label:"KUNJUNGAN",w:80,align:"right"},{label:"FU",w:55,align:"right"},{label:"DEAL",w:55,align:"right"},{label:"REJECT",w:55,align:"right"},{label:"CONVERSION",w:90,align:"right"}];
+  p.tableHeader(picCols);
+  const picNames = [...new Set(all.map(m=>m.pic))].sort();
+  if(!picNames.length){ p.paragraph("Belum ada laporan marketing.", {size:9, color:[130,130,130]}); }
+  picNames.map(pic=>{
+    const rows = all.filter(m=>m.pic===pic);
+    const deal = rows.filter(m=>m.hasil==="Deal").length;
+    const conv = rows.length>0 ? deal/rows.length*100 : 0;
+    return {pic, total:rows.length, fu:rows.filter(m=>m.hasil==="FU").length, deal, reject:rows.filter(m=>m.hasil==="Reject").length, conv};
+  }).sort((a,b)=>b.conv-a.conv).forEach((r,i)=>{
+    const convColor = r.conv>=50 ? PDF_GREEN : r.conv>=20 ? PDF_AMBER : PDF_RED;
+    p.tableRow(picCols, [r.pic, r.total, r.fu, r.deal, r.reject, r.conv.toFixed(0)+"%"], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_GREEN,PDF_RED,convColor], dots:{5:convColor}});
+  });
+  p.setY(p.getY()+10);
+
   p.sectionTitle("Daftar Lengkap Laporan Marketing");
   const cols = [{label:"TGL",w:60},{label:"PIC",w:85},{label:"KOL",w:85},{label:"USAHA",w:75},{label:"HASIL",w:45},{label:"DETAIL",w:60},{label:"KETERANGAN",w:90}];
   p.tableHeader(cols);
+  if(!all.length){ p.paragraph("Belum ada laporan marketing.", {size:9, color:[130,130,130]}); }
   [...all].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).forEach((m,i)=>{
     const detail = m.hasil==="FU" ? (m.tanggalFU||"-") : "—";
-    const color = m.hasil==="Deal" ? [28,138,85] : m.hasil==="Reject" ? [194,58,58] : [40,40,40];
-    p.tableRow(cols, [m.createdAt?new Date(m.createdAt).toLocaleDateString('id-ID'):"-", m.pic, m.kol, m.usaha||"—", m.hasil, detail, m.keterangan||""], {zebra:i%2===0, color});
+    const color = m.hasil==="Deal" ? PDF_GREEN : m.hasil==="Reject" ? PDF_RED : PDF_BLACK;
+    p.tableRow(cols, [m.createdAt?new Date(m.createdAt).toLocaleDateString('id-ID'):"-", m.pic, m.kol, m.usaha||"—", m.hasil, detail, m.keterangan||""], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,color,PDF_BLACK,PDF_BLACK], dots:{4:color}});
   });
   p.finish(`Detail_Marketing_${new Date().toISOString().slice(0,10)}.pdf`);
   toast("PDF detail Marketing berhasil diunduh", "📄");
@@ -5100,7 +5148,7 @@ function pdfPipelineDetail(){
     });
     p.setY(p.getY()+10);
   }
-  drawScheme("Laporan Realita — dari Realisasi saja (+ CASA & DPK)", "realita");
+  drawScheme("Laporan Realisasi — dari Realisasi saja (+ CASA & DPK)", "realita");
   drawScheme("Laporan Komitmen — dari Realisasi + Total Potensi (+ CASA & DPK)", "komitmen");
   p.sectionTitle(`Daftar Entri Pipeline (sesuai filter aktif — ${filtered.length} entri)`);
   const cols = [{label:"PIC",w:63},{label:"NASABAH",w:63},{label:"JENIS",w:44},{label:"NO. REK",w:85},{label:"NOMINAL (JUTA)",w:55,align:"right"},{label:"SUMBER",w:46},{label:"TGL",w:60},{label:"STATUS",w:46}];
@@ -5279,7 +5327,7 @@ async function downloadSummaryPDF(){
       });
       y += 10;
     }
-    drawPipelineScheme("Laporan Realita — dari Realisasi saja", "realita");
+    drawPipelineScheme("Laporan Realisasi — dari Realisasi saja", "realita");
     drawPipelineScheme("Laporan Komitmen — dari Realisasi + Total Potensi", "komitmen");
 
     const totalPipelineAll = pipelineTotalPipeline(state.pipeline);
@@ -5308,7 +5356,7 @@ async function downloadSummaryPDF(){
       const pct = target>0 ? Math.min(real/target, MAX_CAP) : 0;
       return {p, target, real, gap:Math.max(target-real,0), pct};
     }).sort((a,b)=>b.pct-a.pct);
-    const prodCols = [{label:"PRODUK",w:150},{label:"TARGET",w:80,align:"right"},{label:"REALISASI",w:90,align:"right"},{label:"GAP",w:80,align:"right"},{label:"% CAPAIAN",w:90,align:"right"},{label:"STATUS",w:65}];
+    const prodCols = [{label:"PRODUK",w:135},{label:"TARGET",w:70,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:"GAP",w:70,align:"right"},{label:"% CAPAIAN",w:80,align:"right"},{label:"STATUS",w:58}];
     tableHeader(prodCols);
     prodTotals.forEach((pt,i)=>{
       const st = statusFor(pt.pct);
@@ -5317,7 +5365,7 @@ async function downloadSummaryPDF(){
 
     // ===== HALAMAN: DETAIL PER KARYAWAN, DIKELOMPOKKAN PER TIM =====
     newPage("Detail Pencapaian per Karyawan (per Tim)");
-    const empCols = [{label:"NAMA",w:190},{label:"TARGET",w:70,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:"GAP",w:70,align:"right"},{label:"% CAPAIAN",w:70,align:"right"},{label:"STATUS",w:60}];
+    const empCols = [{label:"NAMA",w:170},{label:"TARGET",w:62,align:"right"},{label:"REALISASI",w:72,align:"right"},{label:"GAP",w:62,align:"right"},{label:"% CAPAIAN",w:62,align:"right"},{label:"STATUS",w:54}];
     CFG.teams.forEach(team=>{
       const list = teamStats(team);
       if(!list.length) return;

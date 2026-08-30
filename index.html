@@ -4749,7 +4749,17 @@ function createPdfDoc(subtitleRight){
       doc.setTextColor(cellColor[0],cellColor[1],cellColor[2]);
       const raw = String(values[i] ?? "");
       const val = fitText(raw, col.w-10);
-      doc.text(val, col.align==="right"? cx+col.w-8 : cx, y, {align:col.align||"left"});
+      // opts.dots: { <indeks_kolom>: [r,g,b] } — gambar bulatan kecil berwarna
+      // (lampu lalu lintas) SEBELUM teks di kolom itu, digambar sebagai bentuk
+      // vektor (bukan emoji font) supaya tidak pernah rusak/mojibake di PDF.
+      const dotColor = opts.dots && opts.dots[i];
+      let textX = col.align==="right"? cx+col.w-8 : cx;
+      if(dotColor){
+        doc.setFillColor(dotColor[0],dotColor[1],dotColor[2]);
+        const dotX = col.align==="right" ? textX - doc.getTextWidth(val) - 7 : textX - 9;
+        doc.circle(dotX, y-2.6, 2.6, "F");
+      }
+      doc.text(val, textX, y, {align:col.align||"left"});
       cx += col.w;
     });
     // Garis tipis di bawah setiap baris — supaya tabel terlihat rapi, tidak
@@ -5078,7 +5088,7 @@ function pdfPipelineDetail(){
       const sch = st[schemeKey];
       const pct = st.target>0 ? (sch.gap+st.target)/st.target*100 : 0;
       p.tableRow(mainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(st.target), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
-        {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK, st.target>0?pdfAchievementColor(pct):PDF_BLACK]});
+        {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK, st.target>0?pdfAchievementColor(pct):PDF_BLACK], dots: st.target>0 ? {5: pdfAchievementColor(pct)} : null});
     });
     p.setY(p.getY()+8);
     p.tableHeader(cmpCols);
@@ -5171,7 +5181,14 @@ async function downloadSummaryPDF(){
         doc.setTextColor(cellColor[0],cellColor[1],cellColor[2]);
         const raw = String(values[i] ?? "");
         const val = fitText(raw, col.w-10);
-        doc.text(val, col.align==="right"? cx+col.w-8 : cx, y, {align:col.align||"left"});
+        const dotColor = opts.dots && opts.dots[i];
+        let textX = col.align==="right"? cx+col.w-8 : cx;
+        if(dotColor){
+          doc.setFillColor(dotColor[0],dotColor[1],dotColor[2]);
+          const dotX = col.align==="right" ? textX - doc.getTextWidth(val) - 7 : textX - 9;
+          doc.circle(dotX, y-2.6, 2.6, "F");
+        }
+        doc.text(val, textX, y, {align:col.align||"left"});
         cx += col.w;
       });
       doc.setDrawColor(225,229,236); doc.setLineWidth(0.3);
@@ -5232,6 +5249,58 @@ async function downloadSummaryPDF(){
     });
 
     // ===== HALAMAN: AKUISISI PER PRODUK (CABANG) =====
+    // ===== HALAMAN: PIPELINE DANA (Tabungan, Giro, Deposito, CASA, DPK) =====
+    newPage("Pipeline Dana — Tabungan, Giro, Deposito, CASA & DPK");
+    const plGroups = [
+      ["Tabungan", ["Tabungan"]], ["Giro", ["Giro"]], ["Deposito", ["Deposito"]],
+      ["CASA (Tabungan+Giro)", ["Tabungan","Giro"]], ["DPK (Tab.+Giro+Deposito)", ["Tabungan","Giro","Deposito"]],
+    ];
+    const plMainCols = [{label:"JENIS",w:105},{label:"POTENSI",w:80,align:"right"},{label:"PIPELINE",w:80,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:"TARGET",w:75,align:"right"},{label:"GAP",w:75,align:"right"}];
+    const plCmpCols = [{label:"JENIS",w:105},{label:"MTD",w:135,align:"right"},{label:"YTD",w:135,align:"right"},{label:"YOY",w:135,align:"right"}];
+    function drawPipelineScheme(title, schemeKey){
+      sectionTitle(title);
+      doc.setFont("helvetica","italic"); doc.setFontSize(8); doc.setTextColor(130,130,130);
+      doc.text("Semua nilai dalam juta rupiah.", MARGIN, y); y += 12;
+      tableHeader(plMainCols);
+      plGroups.forEach(([label, jenisList], i)=>{
+        const st = pipelineGroupStats(state.pipeline, jenisList);
+        const sch = st[schemeKey];
+        const pct = st.target>0 ? (sch.gap+st.target)/st.target*100 : 0;
+        tableRow(plMainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(st.target), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
+          {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK, st.target>0?pdfAchievementColor(pct):PDF_BLACK], dots: st.target>0 ? {5: pdfAchievementColor(pct)} : null});
+      });
+      y += 8;
+      tableHeader(plCmpCols);
+      plGroups.forEach(([label, jenisList], i)=>{
+        const st = pipelineGroupStats(state.pipeline, jenisList);
+        const sch = st[schemeKey];
+        tableRow(plCmpCols, [label, (sch.mtd>=0?'+':'')+fmtNumId(sch.mtd), (sch.ytd>=0?'+':'')+fmtNumId(sch.ytd), (sch.yoy>=0?'+':'')+fmtNumId(sch.yoy)],
+          {zebra:i%2===0, colors:[PDF_BLACK, pdfPlusMinusColor(sch.mtd), pdfPlusMinusColor(sch.ytd), pdfPlusMinusColor(sch.yoy)]});
+      });
+      y += 10;
+    }
+    drawPipelineScheme("Laporan Realita — dari Realisasi saja", "realita");
+    drawPipelineScheme("Laporan Komitmen — dari Realisasi + Total Potensi", "komitmen");
+
+    const totalPipelineAll = pipelineTotalPipeline(state.pipeline);
+    const totalPotensiAll = pipelineTotalPotensi(state.pipeline);
+    ensureSpace(30);
+    doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(11,30,58);
+    doc.text(`Total Pipeline keseluruhan: ${fmtJuta(totalPipelineAll)}   |   Total Potensi keseluruhan: ${fmtJuta(totalPotensiAll)}   |   ${state.pipeline.length} entri`, MARGIN, y);
+    y += 20;
+
+    sectionTitle(`Daftar Lengkap Entri Pipeline (${state.pipeline.length} entri)`);
+    const plDetailCols = [{label:"PIC",w:63},{label:"NASABAH",w:63},{label:"JENIS",w:44},{label:"NO. REK",w:85},{label:"NOMINAL (JUTA)",w:55,align:"right"},{label:"SUMBER",w:46},{label:"TGL",w:60},{label:"STATUS",w:46}];
+    tableHeader(plDetailCols);
+    if(!state.pipeline.length){
+      doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(120,120,120);
+      doc.text("Belum ada laporan pipeline dana.", MARGIN, y); y+=14;
+    } else {
+      [...state.pipeline].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).forEach((e,i)=>{
+        tableRow(plDetailCols, [e.pic, e.nasabah, e.jenis, e.norek, fmtNumId(e.nominal), e.sumber, e.tanggal, e.status], {zebra:i%2===0});
+      });
+    }
+
     newPage("Akuisisi per Produk (Cabang)");
     const prodTotals = CFG.products.map(p=>{
       let target=0, real=0;
@@ -5317,58 +5386,6 @@ async function downloadSummaryPDF(){
     } else {
       doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(120,120,120);
       doc.text("Belum ada data penilaian bulan ini.", MARGIN, y); y+=14;
-    }
-
-    // ===== HALAMAN: PIPELINE DANA (Tabungan, Giro, Deposito, CASA, DPK) =====
-    newPage("Pipeline Dana — Tabungan, Giro, Deposito, CASA & DPK");
-    const plGroups = [
-      ["Tabungan", ["Tabungan"]], ["Giro", ["Giro"]], ["Deposito", ["Deposito"]],
-      ["CASA (Tabungan+Giro)", ["Tabungan","Giro"]], ["DPK (Tab.+Giro+Deposito)", ["Tabungan","Giro","Deposito"]],
-    ];
-    const plMainCols = [{label:"JENIS",w:105},{label:"POTENSI",w:80,align:"right"},{label:"PIPELINE",w:80,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:"TARGET",w:75,align:"right"},{label:"GAP",w:75,align:"right"}];
-    const plCmpCols = [{label:"JENIS",w:105},{label:"MTD",w:135,align:"right"},{label:"YTD",w:135,align:"right"},{label:"YOY",w:135,align:"right"}];
-    function drawPipelineScheme(title, schemeKey){
-      sectionTitle(title);
-      doc.setFont("helvetica","italic"); doc.setFontSize(8); doc.setTextColor(130,130,130);
-      doc.text("Semua nilai dalam juta rupiah.", MARGIN, y); y += 12;
-      tableHeader(plMainCols);
-      plGroups.forEach(([label, jenisList], i)=>{
-        const st = pipelineGroupStats(state.pipeline, jenisList);
-        const sch = st[schemeKey];
-        const pct = st.target>0 ? (sch.gap+st.target)/st.target*100 : 0;
-        tableRow(plMainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(st.target), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
-          {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK, st.target>0?pdfAchievementColor(pct):PDF_BLACK]});
-      });
-      y += 8;
-      tableHeader(plCmpCols);
-      plGroups.forEach(([label, jenisList], i)=>{
-        const st = pipelineGroupStats(state.pipeline, jenisList);
-        const sch = st[schemeKey];
-        tableRow(plCmpCols, [label, (sch.mtd>=0?'+':'')+fmtNumId(sch.mtd), (sch.ytd>=0?'+':'')+fmtNumId(sch.ytd), (sch.yoy>=0?'+':'')+fmtNumId(sch.yoy)],
-          {zebra:i%2===0, colors:[PDF_BLACK, pdfPlusMinusColor(sch.mtd), pdfPlusMinusColor(sch.ytd), pdfPlusMinusColor(sch.yoy)]});
-      });
-      y += 10;
-    }
-    drawPipelineScheme("Laporan Realita — dari Realisasi saja", "realita");
-    drawPipelineScheme("Laporan Komitmen — dari Realisasi + Total Potensi", "komitmen");
-
-    const totalPipelineAll = pipelineTotalPipeline(state.pipeline);
-    const totalPotensiAll = pipelineTotalPotensi(state.pipeline);
-    ensureSpace(30);
-    doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(11,30,58);
-    doc.text(`Total Pipeline keseluruhan: ${fmtJuta(totalPipelineAll)}   |   Total Potensi keseluruhan: ${fmtJuta(totalPotensiAll)}   |   ${state.pipeline.length} entri`, MARGIN, y);
-    y += 20;
-
-    sectionTitle(`Daftar Lengkap Entri Pipeline (${state.pipeline.length} entri)`);
-    const plDetailCols = [{label:"PIC",w:63},{label:"NASABAH",w:63},{label:"JENIS",w:44},{label:"NO. REK",w:85},{label:"NOMINAL (JUTA)",w:55,align:"right"},{label:"SUMBER",w:46},{label:"TGL",w:60},{label:"STATUS",w:46}];
-    tableHeader(plDetailCols);
-    if(!state.pipeline.length){
-      doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(120,120,120);
-      doc.text("Belum ada laporan pipeline dana.", MARGIN, y); y+=14;
-    } else {
-      [...state.pipeline].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).forEach((e,i)=>{
-        tableRow(plDetailCols, [e.pic, e.nasabah, e.jenis, e.norek, fmtNumId(e.nominal), e.sumber, e.tanggal, e.status], {zebra:i%2===0});
-      });
     }
 
     // footer halaman terakhir

@@ -3019,6 +3019,20 @@ function pipelineAchievementDot(pct){
   if(pct <= 100) return {dot:"🟡", color:"var(--warn)"};
   return {dot:"🟢", color:"var(--ok)"};
 }
+/* Warna untuk laporan PDF: merah untuk minus, hitam untuk plus (sesuai
+   konvensi akuntansi), dan tiga warna lampu lalu lintas (merah/kuning/hijau)
+   khusus untuk pencapaian terhadap target — dipakai supaya laporan lebih
+   enak dibaca sekilas, tanpa perlu baca angka satu-satu. */
+const PDF_RED = [194,58,58];
+const PDF_GREEN = [28,138,85];
+const PDF_AMBER = [176,124,10];
+const PDF_BLACK = [30,32,38];
+function pdfPlusMinusColor(v){ return v < 0 ? PDF_RED : PDF_BLACK; }
+function pdfAchievementColor(pct){
+  if(pct < 95) return PDF_RED;
+  if(pct <= 100) return PDF_AMBER;
+  return PDF_GREEN;
+}
 function fmtJuta(n){ return `Rp ${Number(n||0).toLocaleString('id-ID')} jt`; }
 function fmtNumId(n){ return Number(n||0).toLocaleString('id-ID'); }
 
@@ -4725,9 +4739,14 @@ function createPdfDoc(subtitleRight){
     ensureSpace(13);
     if(opts.zebra){ doc.setFillColor(246,248,252); doc.rect(MARGIN, y-9, PAGE_W-2*MARGIN, 12.5, "F"); }
     doc.setFont("helvetica", opts.bold?"bold":"normal"); doc.setFontSize(8);
-    const c = opts.color||[40,40,40]; doc.setTextColor(c[0],c[1],c[2]);
+    const rowColor = opts.color||[40,40,40];
     let cx = MARGIN+5;
     cols.forEach((col,i)=>{
+      // opts.colors (satu warna per kolom) diprioritaskan di atas opts.color
+      // (satu warna untuk semua kolom) — supaya mis. kolom GAP bisa berwarna
+      // beda dari kolom lain di baris yang sama.
+      const cellColor = (opts.colors && opts.colors[i]) || rowColor;
+      doc.setTextColor(cellColor[0],cellColor[1],cellColor[2]);
       const raw = String(values[i] ?? "");
       const val = fitText(raw, col.w-10);
       doc.text(val, col.align==="right"? cx+col.w-8 : cx, y, {align:col.align||"left"});
@@ -4811,7 +4830,8 @@ function pdfDashboardDetail(){
   CFG.teams.forEach((team,i)=>{
     const avg = teamAverage(team);
     const cnt = CFG.employees.filter(e=>e.team===team).length;
-    p.tableRow(teamCols, [team, cnt, pctStr(avg), statusFor(avg).label], {zebra:i%2===0});
+    const col = pdfAchievementColor(avg*100);
+    p.tableRow(teamCols, [team, cnt, pctStr(avg), statusFor(avg).label], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,col,col]});
   });
   p.setY(p.getY()+10);
 
@@ -4821,14 +4841,16 @@ function pdfDashboardDetail(){
   CFG.teams.forEach((team,i)=>{
     const teamStatsList = stats.filter(s=>s.team===team).sort((a,b)=>b.overall-a.overall);
     const champ = teamStatsList[0];
-    p.tableRow(champCols, [team, champ && champ.overall>0 ? champ.name : "Belum ada capaian", champ && champ.overall>0 ? pctStr(champ.overall) : "-"], {zebra:i%2===0});
+    const hasChamp = champ && champ.overall>0;
+    p.tableRow(champCols, [team, hasChamp ? champ.name : "Belum ada capaian", hasChamp ? pctStr(champ.overall) : "-"],
+      {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK, hasChamp?pdfAchievementColor(champ.overall*100):[130,130,130]]});
   });
   p.setY(p.getY()+10);
 
   p.sectionTitle("Top 10 Karyawan — Semua Tim");
   const topCols = [{label:"#",w:40},{label:"NAMA",w:220},{label:"TIM",w:150},{label:"CAPAIAN",w:80,align:"right"}];
   p.tableHeader(topCols);
-  stats.slice(0,10).forEach((s,i)=> p.tableRow(topCols, [`${i+1}`, s.name, s.team, pctStr(s.overall)], {zebra:i%2===0}));
+  stats.slice(0,10).forEach((s,i)=> p.tableRow(topCols, [`${i+1}`, s.name, s.team, pctStr(s.overall)], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK, pdfAchievementColor(s.overall*100)]}));
   p.setY(p.getY()+10);
 
   p.sectionTitle("Akuisisi per Produk (Cabang)");
@@ -4838,7 +4860,7 @@ function pdfDashboardDetail(){
     const totalUnit = state.reports.filter(r=>r.status==='approved' && r.product===prod).reduce((s,r)=>s+Number(r.amount||0),0);
     const totalTarget = CFG.employees.reduce((s,e)=>s+Number((e.targets&&e.targets[prod])||0),0);
     const pct = totalTarget>0 ? totalUnit/totalTarget : 0;
-    p.tableRow(prodCols, [prod, `${totalUnit} / ${totalTarget} Account`, totalTarget, pctStr(pct)], {zebra:i%2===0});
+    p.tableRow(prodCols, [prod, `${totalUnit} / ${totalTarget} Account`, totalTarget, pctStr(pct)], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK, totalTarget>0?pdfAchievementColor(pct*100):[130,130,130]]});
   });
   p.finish(`Detail_Dashboard_${state.month}.pdf`);
   toast("PDF detail Dashboard berhasil diunduh", "📄");
@@ -4874,12 +4896,18 @@ function pdfLeaderboardDetail(){
   p.tableHeader(teamCols);
   const teamsToShow = scope==="all" ? CFG.teams : [scope];
   const teamRanked = teamsToShow.map(t=>({team:t, avg:teamAverage(t), cnt:CFG.employees.filter(e=>e.team===t).length})).sort((a,b)=>b.avg-a.avg);
-  teamRanked.forEach((t,i)=> p.tableRow(teamCols, [`${i+1}`, t.team, t.cnt, pctStr(t.avg), statusFor(t.avg).label], {zebra:i%2===0}));
+  teamRanked.forEach((t,i)=>{
+    const col = pdfAchievementColor(t.avg*100);
+    p.tableRow(teamCols, [`${i+1}`, t.team, t.cnt, pctStr(t.avg), statusFor(t.avg).label], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col,col]});
+  });
   p.setY(p.getY()+10);
   p.sectionTitle(`Peringkat per Karyawan — ${scope==="all"?"Semua Tim":scope}`);
   const cols = [{label:"#",w:40},{label:"NAMA",w:220},{label:"TIM",w:150},{label:"CAPAIAN",w:80,align:"right"},{label:"STATUS",w:70}];
   p.tableHeader(cols);
-  list.forEach((s,i)=> p.tableRow(cols, [`${i+1}`, s.name, s.team, pctStr(s.overall), statusFor(s.overall).label], {zebra:i%2===0}));
+  list.forEach((s,i)=>{
+    const col = pdfAchievementColor(s.overall*100);
+    p.tableRow(cols, [`${i+1}`, s.name, s.team, pctStr(s.overall), statusFor(s.overall).label], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col,col]});
+  });
   p.finish(`Detail_Leaderboard_${state.month}.pdf`);
   toast("PDF detail Leaderboard berhasil diunduh", "📄");
 }
@@ -5048,14 +5076,17 @@ function pdfPipelineDetail(){
     groups.forEach(([label, jenisList], i)=>{
       const st = pipelineGroupStats(filtered, jenisList);
       const sch = st[schemeKey];
-      p.tableRow(mainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(st.target), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)], {zebra:i%2===0, color: sch.gap<0?[194,58,58]:[40,40,40]});
+      const pct = st.target>0 ? (sch.gap+st.target)/st.target*100 : 0;
+      p.tableRow(mainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(st.target), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
+        {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK, st.target>0?pdfAchievementColor(pct):PDF_BLACK]});
     });
     p.setY(p.getY()+8);
     p.tableHeader(cmpCols);
     groups.forEach(([label, jenisList], i)=>{
       const st = pipelineGroupStats(filtered, jenisList);
       const sch = st[schemeKey];
-      p.tableRow(cmpCols, [label, (sch.mtd>=0?'+':'')+fmtNumId(sch.mtd), (sch.ytd>=0?'+':'')+fmtNumId(sch.ytd), (sch.yoy>=0?'+':'')+fmtNumId(sch.yoy)], {zebra:i%2===0});
+      p.tableRow(cmpCols, [label, (sch.mtd>=0?'+':'')+fmtNumId(sch.mtd), (sch.ytd>=0?'+':'')+fmtNumId(sch.ytd), (sch.yoy>=0?'+':'')+fmtNumId(sch.yoy)],
+        {zebra:i%2===0, colors:[PDF_BLACK, pdfPlusMinusColor(sch.mtd), pdfPlusMinusColor(sch.ytd), pdfPlusMinusColor(sch.yoy)]});
     });
     p.setY(p.getY()+10);
   }
@@ -5133,9 +5164,11 @@ async function downloadSummaryPDF(){
       ensureSpace(13);
       if(opts.zebra){ doc.setFillColor(246,248,252); doc.rect(MARGIN, y-9, PAGE_W-2*MARGIN, 12.5, "F"); }
       doc.setFont("helvetica", opts.bold?"bold":"normal"); doc.setFontSize(8);
-      const c = opts.color||[40,40,40]; doc.setTextColor(c[0],c[1],c[2]);
+      const rowColor = opts.color||[40,40,40];
       let cx = MARGIN+5;
       cols.forEach((col,i)=>{
+        const cellColor = (opts.colors && opts.colors[i]) || rowColor;
+        doc.setTextColor(cellColor[0],cellColor[1],cellColor[2]);
         const raw = String(values[i] ?? "");
         const val = fitText(raw, col.w-10);
         doc.text(val, col.align==="right"? cx+col.w-8 : cx, y, {align:col.align||"left"});
@@ -5302,14 +5335,17 @@ async function downloadSummaryPDF(){
       plGroups.forEach(([label, jenisList], i)=>{
         const st = pipelineGroupStats(state.pipeline, jenisList);
         const sch = st[schemeKey];
-        tableRow(plMainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(st.target), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)], {zebra:i%2===0, color: sch.gap<0?[194,58,58]:[40,40,40]});
+        const pct = st.target>0 ? (sch.gap+st.target)/st.target*100 : 0;
+        tableRow(plMainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(st.target), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
+          {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK, st.target>0?pdfAchievementColor(pct):PDF_BLACK]});
       });
       y += 8;
       tableHeader(plCmpCols);
       plGroups.forEach(([label, jenisList], i)=>{
         const st = pipelineGroupStats(state.pipeline, jenisList);
         const sch = st[schemeKey];
-        tableRow(plCmpCols, [label, (sch.mtd>=0?'+':'')+fmtNumId(sch.mtd), (sch.ytd>=0?'+':'')+fmtNumId(sch.ytd), (sch.yoy>=0?'+':'')+fmtNumId(sch.yoy)], {zebra:i%2===0});
+        tableRow(plCmpCols, [label, (sch.mtd>=0?'+':'')+fmtNumId(sch.mtd), (sch.ytd>=0?'+':'')+fmtNumId(sch.ytd), (sch.yoy>=0?'+':'')+fmtNumId(sch.yoy)],
+          {zebra:i%2===0, colors:[PDF_BLACK, pdfPlusMinusColor(sch.mtd), pdfPlusMinusColor(sch.ytd), pdfPlusMinusColor(sch.yoy)]});
       });
       y += 10;
     }

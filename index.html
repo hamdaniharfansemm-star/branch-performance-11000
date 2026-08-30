@@ -191,13 +191,14 @@ nav.tabs button.active{
   border:1.5px solid var(--glass-brd);border-radius:14px;
   padding:14px;position:relative;overflow:hidden;
   box-shadow:
-    0 16px 36px -26px rgba(0,0,0,0.85),
-    0 0 0 1px rgba(0,0,0,0.45),
-    0 0 20px -10px rgba(90,168,255,0.35),
-    inset 0 1.5px 0 rgba(255,255,255,0.6),
-    inset 0 -1.5px 0 rgba(0,0,0,0.55),
-    inset 1.5px 0 0 rgba(255,255,255,0.22),
-    inset -1.5px 0 0 rgba(0,0,0,0.35);
+    0 22px 46px -22px rgba(0,0,0,0.9),
+    0 10px 18px -12px rgba(0,0,0,0.65),
+    0 0 0 1px rgba(0,0,0,0.5),
+    0 0 22px -10px rgba(90,168,255,0.4),
+    inset 0 2.5px 0 rgba(255,255,255,0.7),
+    inset 0 -2.5px 0 rgba(0,0,0,0.65),
+    inset 2.5px 0 0 rgba(255,255,255,0.3),
+    inset -2.5px 0 0 rgba(0,0,0,0.45);
   transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
 .card.glow:hover{
@@ -917,7 +918,7 @@ function defaultConfig(){
     teams: [...DEFAULT_TEAMS],
     teamIcons: {...DEFAULT_TEAM_ICON},
     adminNips: ["1290488196"],
-    adminAuth: {}, // { "<nip>": { email, passwordHash, resetCode, resetExpiry } } — keamanan akses Admin
+    userAuth: {}, // { "<nip>": { email, passwordHash, resetCode, resetExpiry, role, firstLoginAt, lastLoginAt, loginCount } } — akun & keamanan SEMUA pengguna (Admin & karyawan)
     brandTitle: "Branch Performance",
     brandNumber: "11000",
     brandSubtitle: "Bank Mandiri · Cabang Jambi Gatot Subroto",
@@ -926,7 +927,7 @@ function defaultConfig(){
     pipelineMTDBase: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },   // dana di akhir bulan lalu (tahun sama)
     pipelineYTDBase: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },   // dana di akhir tahun lalu
     pipelineYOYBase: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },   // dana di bulan sama, tahun lalu
-    dashboardSectionOrder: ["kpi","teams","chart","top5","products"],
+    dashboardSectionOrder: ["kpi","teams","topPerTeam","chart","top5","products"],
     pipelineSectionOrder: ["filter","kpi","jenis","target","lapor","list"],
     leaderboardSectionOrder: ["chips","list"],
     layananSectionOrder: ["layananInput","layananLB","efisiensi","layananDetail","penilaianInput","penilaianLB","penilaianDetail"],
@@ -951,6 +952,13 @@ async function loadConfig(){
   }
   if(Array.isArray(raw) && raw.length && raw[0] && typeof raw[0]==="object"){
     CFG = {...defaultConfig(), ...raw[0]};
+    // Migrasi: kalau ada data lama tersimpan di field "adminAuth" (nama field
+    // sebelum sistem akun diperluas ke semua pengguna), gabungkan ke dalam
+    // "userAuth" supaya password Admin yang sudah pernah dibuat sebelumnya
+    // tidak hilang/perlu dibuat ulang.
+    if(raw[0].adminAuth && typeof raw[0].adminAuth === "object"){
+      CFG.userAuth = {...raw[0].adminAuth, ...CFG.userAuth};
+    }
   } else {
     // Server memang belum pernah punya config sama sekali (pemakaian pertama kali) -> wajar pakai default & simpan sekali.
     CFG = defaultConfig();
@@ -1052,8 +1060,47 @@ async function sha256Hex(text){
   const hashBuf = await crypto.subtle.digest("SHA-256", enc);
   return Array.from(new Uint8Array(hashBuf)).map(b=>b.toString(16).padStart(2,"0")).join("");
 }
+/* Tambahkan tombol "mata" (lihat/sembunyikan) di setiap kolom password di
+   dalam wadah tertentu — supaya pengguna bisa memastikan password yang
+   diketik sudah benar sebelum mengirim, bukan cuma titik-titik buta. */
+function addPasswordToggles(container){
+  if(!container) return;
+  container.querySelectorAll('input[type=password]').forEach(inp=>{
+    if(inp.dataset.eyeWired) return;
+    inp.dataset.eyeWired = "1";
+    const wrap = document.createElement("div");
+    wrap.style.position = "relative";
+    inp.parentNode.insertBefore(wrap, inp);
+    wrap.appendChild(inp);
+    inp.style.paddingRight = "42px";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "👁️";
+    btn.setAttribute("aria-label", "Lihat/sembunyikan password");
+    btn.style.cssText = "position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;padding:6px;opacity:0.75;line-height:1;";
+    btn.onclick = ()=>{
+      const showing = inp.type === "text";
+      inp.type = showing ? "password" : "text";
+      btn.textContent = showing ? "👁️" : "🙈";
+    };
+    wrap.appendChild(btn);
+  });
+}
 function genResetCode(){
   return String(Math.floor(100000 + Math.random()*900000)); // kode 6 digit
+}
+/* Catat aktivitas login (kapan terakhir & berapa kali) supaya Admin bisa
+   melihat pengguna mana yang paling aktif. Best-effort — kalau gagal
+   menyimpan, login tetap dilanjutkan (bukan penghalang). */
+async function recordLoginActivity(nip){
+  try{
+    await mutateConfigAndSave((cfg)=>{
+      if(!cfg.userAuth) cfg.userAuth = {};
+      if(!cfg.userAuth[nip]) return;
+      cfg.userAuth[nip].lastLoginAt = Date.now();
+      cfg.userAuth[nip].loginCount = (cfg.userAuth[nip].loginCount||0) + 1;
+    });
+  }catch(e){ /* best-effort */ }
 }
 async function sendResetEmail(to, subject, body){
   if(!APPS_SCRIPT_URL) return false; // mode window.storage (tanpa Apps Script) tidak bisa kirim email sungguhan
@@ -1690,6 +1737,9 @@ function renderDashboard(){
     teams: `
   <h2 class="sec">Pencapaian per Tim <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">klik jumlah karyawan untuk detail</span></h2>
   <div class="grid cols-7" id="teamCards"></div>`,
+    topPerTeam: `
+  <h2 class="sec">🏆 Juara per Tim <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">peraih capaian tertinggi di masing-masing tim</span></h2>
+  <div class="grid cols-7" id="topPerTeamCards"></div>`,
     chart: `
   <h2 class="sec">Grafik Interaktif &mdash; Rata-rata Tim <span class="line"></span></h2>
   <div class="chart-card-light" id="teamChartCard" style="position:relative"></div>`,
@@ -1700,11 +1750,28 @@ function renderDashboard(){
   <h2 class="sec">Akuisisi per Produk (Cabang) <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">klik produk untuk lihat peraih terbanyak</span></h2>
   <div class="grid cols-4" id="productCard" style="grid-template-columns:repeat(4,1fr)"></div>`,
   };
-  const validOrder = ["kpi","teams","chart","top5","products"];
+  const validOrder = ["kpi","teams","topPerTeam","chart","top5","products"];
   const order = (Array.isArray(CFG.dashboardSectionOrder) && validOrder.every(k=>CFG.dashboardSectionOrder.includes(k)))
     ? CFG.dashboardSectionOrder : validOrder;
   const html = order.map(k=>sections[k]||"").join("\n");
   view.innerHTML = html;
+
+  const topPerTeamWrap = document.getElementById("topPerTeamCards");
+  if(topPerTeamWrap){
+    topPerTeamWrap.innerHTML = CFG.teams.map(team=>{
+      const teamStatsList = stats.filter(s=>s.team===team).sort((a,b)=>b.overall-a.overall);
+      const champ = teamStatsList[0];
+      return `
+        <div class="card glow compact" style="text-align:center">
+          <div class="orb o-gold"></div>
+          <div style="font-size:10.5px;font-weight:800;color:var(--ink-400);margin-bottom:6px">${CFG.teamIcons[team]} ${team}</div>
+          ${champ && champ.overall>0 ? `
+            <div style="font-weight:800;font-size:12.5px;color:#fff">${champ.name}</div>
+            <div class="sub up" style="margin-top:3px">${pctStr(champ.overall)}</div>
+          ` : `<div class="hint" style="font-size:11px">Belum ada capaian</div>`}
+        </div>`;
+    }).join("");
+  }
 
   const teamWrap = document.getElementById("teamCards");
   CFG.teams.forEach(team=>{
@@ -2590,6 +2657,7 @@ function renderMarketingSubTab(container){
           </div>
           <div class="field"><label>KOL (ketemu siapa)</label><input type="text" id="mkt_kol" placeholder="Nama nasabah/calon nasabah" required></div>
         </div>
+        <div class="field"><label>Usaha <span style="color:var(--ink-400);font-weight:600">(opsional)</span></label><input type="text" id="mkt_usaha" placeholder="cth. Toko kelontong, warung makan, dsb."></div>
         <div class="field"><label>Hasil</label>
           <select id="mkt_hasil" required>
             <option value="">— pilih hasil —</option>
@@ -2636,12 +2704,13 @@ function renderMarketingSubTab(container){
     e.preventDefault();
     const pic = document.getElementById("mkt_pic").value;
     const kol = document.getElementById("mkt_kol").value.trim();
+    const usaha = document.getElementById("mkt_usaha").value.trim();
     const hasil = hasilSel.value;
     if(!pic || !kol || !hasil){ toast("Lengkapi PIC, KOL, dan Hasil", "⚠️"); return; }
     const ketEl = document.getElementById("mkt_ket");
     const ket = ketEl ? ketEl.value.trim() : "";
     if((hasil==="Deal" || hasil==="Reject") && !ket){ toast("Keterangan wajib diisi untuk hasil ini", "⚠️"); return; }
-    const entry = { id: uid(), pic, kol, hasil, keterangan: ket, createdAt: Date.now() };
+    const entry = { id: uid(), pic, kol, usaha, hasil, keterangan: ket, createdAt: Date.now(), submittedByNip: state.nip };
     if(hasil==="FU"){ entry.tanggalFU = document.getElementById("mkt_tglfu").value; }
     const ok = await mutateAndSave(KEY_MARKETING, "marketing", (fresh)=>{ fresh.push(entry); });
     if(!ok){ toast("Gagal menyimpan, coba lagi", "⚠️"); return; }
@@ -2691,22 +2760,23 @@ function drawMktList(){
     .sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   if(!list.length){ box.innerHTML = `<div class="empty"><div class="e-ic">📣</div>Belum ada laporan marketing yang cocok.</div>`; return; }
   box.innerHTML = `<div style="max-height:520px;overflow:auto"><table class="data">
-    <thead><tr><th>Tgl</th><th>PIC</th><th>KOL</th><th>Hasil</th><th>Detail</th><th>Keterangan</th>${isAdmin?'<th></th>':''}</tr></thead>
+    <thead><tr><th>Tgl</th><th>PIC</th><th>KOL</th><th>Usaha</th><th>Hasil</th><th>Detail</th><th>Keterangan</th><th></th></tr></thead>
     <tbody>
     ${list.map(m=>{
       const detail = m.hasil==="FU" ? `FU: ${m.tanggalFU||'-'}` : '—';
+      const canEdit = isAdmin || (m.submittedByNip && m.submittedByNip === state.nip);
       return `<tr>
         <td>${m.createdAt ? new Date(m.createdAt).toLocaleDateString('id-ID') : '-'}</td>
-        <td>${m.pic}</td><td>${m.kol}</td>
+        <td>${m.pic}</td><td>${m.kol}</td><td>${m.usaha||'—'}</td>
         <td><span class="badge ${MARKETING_HASIL_BADGE[m.hasil]||'pending'}">${m.hasil}</span></td>
         <td>${detail}</td>
         <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.keterangan||'—'}</td>
-        ${isAdmin?`<td style="white-space:nowrap"><button class="btn ghost sm" data-mkt-edit="${m.id}">✏️</button> <button class="btn danger sm" data-mkt-del="${m.id}">🗑️</button></td>`:''}
+        <td style="white-space:nowrap">${canEdit?`<button class="btn ghost sm" data-mkt-edit="${m.id}">✏️</button>`:''} ${isAdmin?`<button class="btn danger sm" data-mkt-del="${m.id}">🗑️</button>`:''}</td>
       </tr>`;
     }).join("")}
     </tbody></table></div>`;
+  box.querySelectorAll("[data-mkt-edit]").forEach(b=>b.onclick=()=>openEditMarketing(b.dataset.mktEdit));
   if(isAdmin){
-    box.querySelectorAll("[data-mkt-edit]").forEach(b=>b.onclick=()=>openEditMarketing(b.dataset.mktEdit));
     box.querySelectorAll("[data-mkt-del]").forEach(b=>b.onclick=async()=>{
       const id = b.dataset.mktDel;
       if(!confirm("Hapus laporan marketing ini?")) return;
@@ -2723,6 +2793,10 @@ function drawMktList(){
 function openEditMarketing(id){
   const m = state.marketing.find(x=>x.id===id);
   if(!m) return;
+  if(state.role !== "admin" && m.submittedByNip !== state.nip){
+    toast("Anda hanya bisa mengubah laporan yang Anda input sendiri", "⚠️");
+    return;
+  }
   const root = document.getElementById("modalRoot");
   root.innerHTML = `
     <div class="modal-backdrop" id="modalBackdrop">
@@ -2733,6 +2807,7 @@ function openEditMarketing(id){
           <select id="em_pic">${CFG.employees.map(e=>`<option value="${e.name}" ${e.name===m.pic?'selected':''}>${e.name}</option>`).join("")}</select>
         </div>
         <div class="field"><label>KOL (ketemu siapa)</label><input type="text" id="em_kol" value="${m.kol}"></div>
+        <div class="field"><label>Usaha (opsional)</label><input type="text" id="em_usaha" value="${m.usaha||''}"></div>
         <div class="field"><label>Hasil</label>
           <select id="em_hasil">${MARKETING_HASIL.map(h=>`<option value="${h}" ${h===m.hasil?'selected':''}>${h}</option>`).join("")}</select>
         </div>
@@ -2760,6 +2835,7 @@ function openEditMarketing(id){
     const edits = {
       pic: document.getElementById("em_pic").value,
       kol: document.getElementById("em_kol").value.trim(),
+      usaha: document.getElementById("em_usaha").value.trim(),
       hasil: hasilSel.value,
       keterangan: document.getElementById("em_ket").value.trim(),
     };
@@ -3785,6 +3861,22 @@ function renderAdmin(){
 
     <div class="card glow" style="margin-bottom:18px">
       <div class="orb o-blue"></div>
+      <h3 class="sub">👥 Kelola Akun Pengguna &amp; Aktivitas</h3>
+      <p class="hint" style="margin-bottom:14px">Daftar semua NIP yang sudah pernah membuat akun (Admin &amp; karyawan) — lihat siapa yang paling aktif, reset password mereka, atau hapus akun (mereka akan diminta buat password baru saat login berikutnya).</p>
+      <div class="grid cols-2" style="gap:12px;margin-bottom:12px">
+        <div class="field" style="margin:0"><label>Urutkan</label>
+          <select id="userAcctSort">
+            <option value="active">Paling Aktif (Jumlah Login)</option>
+            <option value="recent">Terakhir Aktif</option>
+            <option value="nip">NIP</option>
+          </select>
+        </div>
+      </div>
+      <div id="userAccountList" style="overflow-x:auto"></div>
+    </div>
+
+    <div class="card glow" style="margin-bottom:18px">
+      <div class="orb o-blue"></div>
       <h3 class="sub">🧑‍💼 Kelola Karyawan</h3>
       <p class="hint" style="margin-bottom:14px">Tambah, ubah nama/tim, atur target per produk, atau hapus karyawan.</p>
       <div id="empMgmtList" style="margin-bottom:14px;max-height:340px;overflow:auto"></div>
@@ -3901,6 +3993,7 @@ function renderAdmin(){
     </div>
   `;
   drawAdminNipList();
+  drawUserAccountList();
   drawEmpMgmtList();
   drawProdMgmtList();
   drawTeamMgmtList();
@@ -3954,6 +4047,78 @@ function drawAdminNipList(){
       toast(`Akses Admin NIP ${nip} dicabut`, "🗑️");
       playSound("reject");
       if(state.tab === "admin") drawAdminNipList();
+    };
+  });
+}
+/* Panel Admin: daftar semua akun (Admin & karyawan) yang sudah pernah
+   dibuat, urut berdasarkan seberapa aktif mereka (jumlah login / terakhir
+   aktif) — juga tempat Admin mereset password atau menghapus akun orang
+   lain. */
+function drawUserAccountList(){
+  const box = document.getElementById("userAccountList");
+  if(!box) return;
+  const sortSel = document.getElementById("userAcctSort");
+  const sortBy = sortSel ? sortSel.value : "active";
+  const entries = Object.entries(CFG.userAuth||{});
+  if(!entries.length){
+    box.innerHTML = `<div class="hint">Belum ada akun yang dibuat siapa pun.</div>`;
+    return;
+  }
+  entries.sort((a,b)=>{
+    if(sortBy==="active") return (b[1].loginCount||0)-(a[1].loginCount||0);
+    if(sortBy==="recent") return (b[1].lastLoginAt||0)-(a[1].lastLoginAt||0);
+    return a[0].localeCompare(b[0]);
+  });
+  box.innerHTML = `<table class="data">
+    <thead><tr><th>NIP</th><th>Email</th><th>Peran</th><th>Login</th><th>Terakhir Aktif</th><th></th></tr></thead>
+    <tbody>
+    ${entries.map(([nip, a])=>{
+      const isCurrentAdmin = CFG.adminNips.includes(nip);
+      const roleLabel = isCurrentAdmin ? "Admin" : "Karyawan";
+      const lastActive = a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString('id-ID',{dateStyle:'medium',timeStyle:'short'}) : "-";
+      return `<tr>
+        <td style="font-weight:700">${nip}${nip===state.nip?' <span class="badge ok" style="font-size:9px">Anda</span>':''}</td>
+        <td>${a.email||'-'}</td>
+        <td><span class="badge ${isCurrentAdmin?'pending':'ok'}">${roleLabel}</span></td>
+        <td style="text-align:center">${a.loginCount||0}x</td>
+        <td>${lastActive}</td>
+        <td style="white-space:nowrap">
+          <button class="btn ghost sm" data-reset-pw="${nip}">🔁 Reset Password</button>
+          <button class="btn danger sm" data-del-acct="${nip}">🗑️ Hapus</button>
+        </td>
+      </tr>`;
+    }).join("")}
+    </tbody></table>`;
+  if(sortSel) sortSel.onchange = drawUserAccountList;
+  box.querySelectorAll("[data-reset-pw]").forEach(b=>{
+    b.onclick = async ()=>{
+      const nip = b.dataset.resetPw;
+      if(!confirm(`Reset password akun NIP ${nip}? Mereka akan diminta membuat password baru saat login berikutnya.`)) return;
+      const ok = await mutateConfigAndSave((cfg)=>{
+        if(cfg.userAuth && cfg.userAuth[nip]){
+          cfg.userAuth[nip].passwordHash = null;
+          cfg.userAuth[nip].resetCode = null;
+          cfg.userAuth[nip].resetExpiry = null;
+        }
+      });
+      if(!ok){ toast("Gagal menyimpan, coba lagi", "⚠️"); return; }
+      toast(`Password NIP ${nip} sudah direset`, "🔁");
+      playSound("click");
+      if(state.tab === "admin") drawUserAccountList();
+    };
+  });
+  box.querySelectorAll("[data-del-acct]").forEach(b=>{
+    b.onclick = async ()=>{
+      const nip = b.dataset.delAcct;
+      if(nip === state.nip){ toast("Tidak bisa menghapus akun Anda sendiri saat sedang login", "⚠️"); return; }
+      if(!confirm(`Hapus akun NIP ${nip}? Mereka akan diminta membuat akun baru (email & password) saat login berikutnya.`)) return;
+      const ok = await mutateConfigAndSave((cfg)=>{
+        if(cfg.userAuth) delete cfg.userAuth[nip];
+      });
+      if(!ok){ toast("Gagal menyimpan, coba lagi", "⚠️"); return; }
+      toast(`Akun NIP ${nip} dihapus`, "🗑️");
+      playSound("reject");
+      if(state.tab === "admin") drawUserAccountList();
     };
   });
 }
@@ -4174,6 +4339,7 @@ const SECTION_LABELS = {
   dashboard: {
     kpi: "📊 Ringkasan Cabang (kartu KPI)",
     teams: "👥 Pencapaian per Tim",
+    topPerTeam: "🏆 Juara per Tim",
     chart: "📈 Grafik Interaktif Tim",
     top5: "🏆 Top 5 Karyawan",
     products: "📦 Akuisisi per Produk",
@@ -4201,7 +4367,7 @@ const SECTION_LABELS = {
   },
 };
 const SECTION_ORDER_DEFAULTS = {
-  dashboard: ["kpi","teams","chart","top5","products"],
+  dashboard: ["kpi","teams","topPerTeam","chart","top5","products"],
   pipeline: ["filter","kpi","jenis","target","lapor","list"],
   leaderboard: ["chips","list"],
   layanan: ["layananInput","layananLB","efisiensi","layananDetail","penilaianInput","penilaianLB","penilaianDetail"],
@@ -4731,12 +4897,12 @@ function pdfMarketingDetail(){
   p.paragraph(`Total Kunjungan: ${all.length}   |   FU: ${cnt("FU")}   |   Deal: ${cnt("Deal")}   |   Reject: ${cnt("Reject")}`, {bold:true});
   p.setY(p.getY()+8);
   p.sectionTitle("Daftar Lengkap Laporan Marketing");
-  const cols = [{label:"TGL",w:60},{label:"PIC",w:110},{label:"KOL",w:120},{label:"HASIL",w:55},{label:"DETAIL",w:70},{label:"KETERANGAN",w:145}];
+  const cols = [{label:"TGL",w:52},{label:"PIC",w:90},{label:"KOL",w:90},{label:"USAHA",w:80},{label:"HASIL",w:48},{label:"DETAIL",w:60},{label:"KETERANGAN",w:95}];
   p.tableHeader(cols);
   [...all].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).forEach((m,i)=>{
     const detail = m.hasil==="FU" ? (m.tanggalFU||"-") : "—";
     const color = m.hasil==="Deal" ? [28,138,85] : m.hasil==="Reject" ? [194,58,58] : [40,40,40];
-    p.tableRow(cols, [m.createdAt?new Date(m.createdAt).toLocaleDateString('id-ID'):"-", m.pic, m.kol, m.hasil, detail, m.keterangan||""], {zebra:i%2===0, color});
+    p.tableRow(cols, [m.createdAt?new Date(m.createdAt).toLocaleDateString('id-ID'):"-", m.pic, m.kol, m.usaha||"—", m.hasil, detail, m.keterangan||""], {zebra:i%2===0, color});
   });
   p.finish(`Detail_Marketing_${new Date().toISOString().slice(0,10)}.pdf`);
   toast("PDF detail Marketing berhasil diunduh", "📄");
@@ -5260,33 +5426,32 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
       const loaded = await loadConfig();
       if(!loaded){ toast("Gagal memeriksa akses, coba lagi", "⚠️"); return; }
       const isAdmin = CFG.adminNips.includes(nip);
-      if(!isAdmin){
-        await doLoginFlow(nip);
-        return;
-      }
+      const roleLabel = isAdmin ? "Admin" : "karyawan";
       loginPendingNip = nip;
       document.getElementById("loginNIP").disabled = true;
-      const auth = (CFG.adminAuth||{})[nip];
+      const auth = (CFG.userAuth||{})[nip];
       if(auth && auth.passwordHash){
         loginStage = "password";
         document.getElementById("loginStep2").innerHTML = `
-          <div class="field"><label>Password Admin</label><input type="password" id="loginPassword" autocomplete="current-password" required></div>
+          <div class="field"><label>Password</label><input type="password" id="loginPassword" autocomplete="current-password" required></div>
           <p style="text-align:right;margin:-6px 0 4px"><a href="#" id="forgotPasswordLink" style="color:var(--gold-300);font-size:12px">Lupa password?</a></p>
         `;
-        document.getElementById("loginFootHint").textContent = `NIP ${nip} terdaftar sebagai Admin — masukkan password.`;
-        btn.textContent = "🔐 Masuk sebagai Admin";
+        document.getElementById("loginFootHint").textContent = `NIP ${nip} (${roleLabel}) — masukkan password.`;
+        btn.textContent = "🔐 Masuk";
         document.getElementById("forgotPasswordLink").onclick = (ev)=>{ ev.preventDefault(); startForgotFlow(); };
+        addPasswordToggles(document.getElementById("loginStep2"));
         document.getElementById("loginPassword").focus();
       } else {
         loginStage = "setup";
         document.getElementById("loginStep2").innerHTML = `
-          <p class="hint" style="margin:6px 0 10px">NIP ini terdaftar sebagai Admin. Buat email &amp; password untuk mengamankan akses Admin.</p>
+          <p class="hint" style="margin:6px 0 10px">Ini pertama kalinya NIP ini masuk. Buat email &amp; password sendiri untuk mengamankan akun Anda — bebas, terserah Anda.</p>
           <div class="field"><label>Email (untuk reset password)</label><input type="email" id="setupEmail" required></div>
           <div class="field"><label>Buat Password (min. 6 karakter)</label><input type="password" id="setupPassword" minlength="6" required></div>
           <div class="field"><label>Ulangi Password</label><input type="password" id="setupPasswordConfirm" minlength="6" required></div>
         `;
-        document.getElementById("loginFootHint").textContent = "Ini pertama kalinya NIP ini login sebagai Admin.";
-        btn.textContent = "💾 Simpan & Masuk sebagai Admin";
+        document.getElementById("loginFootHint").textContent = `Ini pertama kalinya NIP ini login (${roleLabel}).`;
+        btn.textContent = "💾 Simpan & Masuk";
+        addPasswordToggles(document.getElementById("loginStep2"));
         document.getElementById("setupEmail").focus();
       }
       return;
@@ -5294,8 +5459,9 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
     if(loginStage === "password"){
       const pw = document.getElementById("loginPassword").value;
       const hash = await sha256Hex(pw);
-      const auth = (CFG.adminAuth||{})[loginPendingNip];
+      const auth = (CFG.userAuth||{})[loginPendingNip];
       if(!auth || hash !== auth.passwordHash){ toast("Password salah, coba lagi", "⚠️"); return; }
+      await recordLoginActivity(loginPendingNip);
       await doLoginFlow(loginPendingNip);
       resetLoginStage();
       return;
@@ -5308,9 +5474,10 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
       if(pw.length < 6){ toast("Password minimal 6 karakter", "⚠️"); return; }
       if(pw !== pw2){ toast("Password tidak sama, coba lagi", "⚠️"); return; }
       const hash = await sha256Hex(pw);
+      const roleAtSetup = CFG.adminNips.includes(loginPendingNip) ? "admin" : "karyawan";
       const ok = await mutateConfigAndSave((cfg)=>{
-        if(!cfg.adminAuth) cfg.adminAuth = {};
-        cfg.adminAuth[loginPendingNip] = { email, passwordHash: hash };
+        if(!cfg.userAuth) cfg.userAuth = {};
+        cfg.userAuth[loginPendingNip] = { email, passwordHash: hash, role: roleAtSetup, firstLoginAt: Date.now(), lastLoginAt: Date.now(), loginCount: 1 };
       });
       if(!ok){ toast("Gagal menyimpan password, coba lagi", "⚠️"); return; }
       await doLoginFlow(loginPendingNip);
@@ -5318,16 +5485,16 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
       return;
     }
     if(loginStage === "forgot-request"){
-      const auth = (CFG.adminAuth||{})[loginPendingNip];
+      const auth = (CFG.userAuth||{})[loginPendingNip];
       if(!auth || !auth.email){ toast("NIP ini belum punya email terdaftar untuk reset otomatis", "⚠️"); return; }
       const code = genResetCode();
       const ok = await mutateConfigAndSave((cfg)=>{
-        cfg.adminAuth[loginPendingNip].resetCode = code;
-        cfg.adminAuth[loginPendingNip].resetExpiry = Date.now() + 15*60*1000;
+        cfg.userAuth[loginPendingNip].resetCode = code;
+        cfg.userAuth[loginPendingNip].resetExpiry = Date.now() + 15*60*1000;
       });
       if(!ok){ toast("Gagal memproses, coba lagi", "⚠️"); return; }
-      const sent = await sendResetEmail(auth.email, `Kode Reset Password Admin — ${CFG.brandTitle}`,
-        `Kode reset password Admin Anda: ${code}\n\nKode ini berlaku 15 menit. Kalau Anda tidak meminta ini, abaikan email ini.`);
+      const sent = await sendResetEmail(auth.email, `Kode Reset Password — ${CFG.brandTitle}`,
+        `Kode reset password Anda: ${code}\n\nKode ini berlaku 15 menit. Kalau Anda tidak meminta ini, abaikan email ini.`);
       if(!sent){ toast("Gagal mengirim email, coba lagi", "⚠️"); return; }
       toast(`Kode reset sudah dikirim ke ${auth.email}`, "📧");
       loginStage = "forgot-verify";
@@ -5336,21 +5503,22 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
         <div class="field"><label>Password Baru (min. 6 karakter)</label><input type="password" id="newPasswordInput" minlength="6" required></div>
       `;
       btn.textContent = "✅ Reset Password";
+      addPasswordToggles(document.getElementById("loginStep2"));
       document.getElementById("resetCodeInput").focus();
       return;
     }
     if(loginStage === "forgot-verify"){
       const code = document.getElementById("resetCodeInput").value.trim();
       const newPw = document.getElementById("newPasswordInput").value;
-      const auth = (CFG.adminAuth||{})[loginPendingNip];
+      const auth = (CFG.userAuth||{})[loginPendingNip];
       if(!auth || !auth.resetCode || auth.resetCode !== code){ toast("Kode salah", "⚠️"); return; }
       if(Date.now() > (auth.resetExpiry||0)){ toast("Kode sudah kedaluwarsa, minta kode baru", "⚠️"); return; }
       if(newPw.length < 6){ toast("Password minimal 6 karakter", "⚠️"); return; }
       const hash = await sha256Hex(newPw);
       const ok = await mutateConfigAndSave((cfg)=>{
-        cfg.adminAuth[loginPendingNip].passwordHash = hash;
-        cfg.adminAuth[loginPendingNip].resetCode = null;
-        cfg.adminAuth[loginPendingNip].resetExpiry = null;
+        cfg.userAuth[loginPendingNip].passwordHash = hash;
+        cfg.userAuth[loginPendingNip].resetCode = null;
+        cfg.userAuth[loginPendingNip].resetExpiry = null;
       });
       if(!ok){ toast("Gagal menyimpan password baru, coba lagi", "⚠️"); return; }
       toast("Password berhasil direset, silakan masuk", "✅");

@@ -249,6 +249,12 @@ h2.sec{
   text-shadow:0 0 12px rgba(244,201,93,0.7), 0 0 28px rgba(244,201,93,0.35);
   animation:glowPulse 3.2s ease-in-out infinite;
 }
+.spinner-ring{
+  width:44px;height:44px;margin:0 auto;border-radius:50%;
+  border:4px solid rgba(90,168,255,0.18);border-top-color:var(--gold-400);
+  animation:spinRing .8s linear infinite;
+}
+@keyframes spinRing{to{transform:rotate(360deg);}}
 @keyframes glowPulse{
   0%,100%{text-shadow:0 0 8px rgba(244,201,93,0.45), 0 0 18px rgba(244,201,93,0.2);}
   50%{text-shadow:0 0 16px rgba(244,201,93,0.85), 0 0 34px rgba(244,201,93,0.4);}
@@ -661,7 +667,13 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
     <div class="login-grid"></div>
     <div class="login-orbit o1"></div><div class="login-orbit o2"></div>
   </div>
-  <div class="login-card">
+  <div class="login-card" id="loginCard">
+    <div id="autoLoginOverlay" style="display:none;padding:30px 0;text-align:center">
+      <div class="spinner-ring"></div>
+      <p style="margin-top:16px;color:var(--ink-200);font-size:13px;font-weight:700">Menghubungkan ke server...</p>
+      <p style="margin-top:4px;color:var(--ink-400);font-size:11.5px">Mohon tunggu sebentar</p>
+    </div>
+    <div id="loginFormWrap">
     <h1 class="login-title" id="loginBrandTitle">Branch Performance <span class="hl">11000</span></h1>
     <p class="login-sub" id="loginBrandSub">Bank Mandiri &middot; Cabang Jambi Gatot Subroto</p>
     <form id="loginForm">
@@ -673,6 +685,7 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
       <button type="submit" class="btn primary" id="loginSubmitBtn" style="width:100%;justify-content:center;margin-top:8px">🔐 Masuk ke Dashboard</button>
     </form>
     <p class="login-foot" id="loginFootHint">Tulis NIP Anda untuk masuk. Akses Admin otomatis aktif untuk NIP terdaftar.</p>
+    </div>
   </div>
 </div>
 
@@ -1117,7 +1130,14 @@ async function sendResetEmail(to, subject, body){
 async function preloginBatchFetch(keys){
   if(!APPS_SCRIPT_URL) return;
   try{
-    const res = await fetch(`${APPS_SCRIPT_URL}?keys=${encodeURIComponent(keys.join(","))}`);
+    // Beri batas waktu supaya proses ini TIDAK PERNAH menggantung tanpa
+    // henti kalau jaringan benar-benar macet (mis. sinyal hilang) — kalau
+    // sampai 6 detik belum selesai, lanjutkan saja tanpa cache prefetch
+    // (fetchRaw() akan otomatis mengambil satu per satu sebagai cadangan).
+    const controller = new AbortController();
+    const timer = setTimeout(()=> controller.abort(), 6000);
+    const res = await fetch(`${APPS_SCRIPT_URL}?keys=${encodeURIComponent(keys.join(","))}`, {signal: controller.signal});
+    clearTimeout(timer);
     const data = await res.json();
     __loginPrefetchCache = new Map(Object.entries(data.values || {}));
   }catch(e){
@@ -1818,6 +1838,8 @@ function renderDashboard(){
   }).sort((a,b)=>b.pct-a.pct);
   document.getElementById("productCard").innerHTML = prodTotals.map(pt=>{
     const badge = PRODUCT_BADGE[pt.p] || {ic:"PRD", bg:"linear-gradient(145deg,#1a4079,#0b1e3a)"};
+    const gap = pt.real - pt.target;
+    const gapColor = gap < 0 ? "var(--danger)" : "var(--ok)";
     return `
     <div class="item-box" data-product="${pt.p}">
       <div class="ib-top">
@@ -1829,6 +1851,10 @@ function renderDashboard(){
         <div class="ib-pct" style="margin-left:auto">${pctStr(pt.pct)}</div>
       </div>
       <div class="bar-track"><div class="bar-fill ${barClass(pt.pct)}" style="width:${Math.min(pt.pct/1.2*100,100)}%"></div></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+        <span style="font-size:9.5px;color:var(--ink-400);font-weight:700">GAP</span>
+        <span style="font-size:11px;font-weight:800;color:${gapColor}">${gap>=0?'+':''}${gap} Account</span>
+      </div>
     </div>`;
   }).join("");
   document.querySelectorAll("#productCard .item-box").forEach(el=>{
@@ -3004,7 +3030,7 @@ async function handleLeadsUpload(){
 
 /* ---------------- PIPELINE DANA ---------------- */
 const PIPELINE_JENIS = ["Tabungan","Giro","Deposito"];
-const PIPELINE_SUMBER = ["RDPU","Utilisasi","RTGS","Giro","Sesama Mandiri"];
+const PIPELINE_SUMBER = ["RDPU","Utilisasi","RTGS","Giro","Sesama Mandiri","Tunai"];
 const PIPELINE_STATUS = ["FU","Sudah Masuk","Cancel","Ontrack"];
 const PIPELINE_STATUS_BADGE = { "FU":"warn", "Sudah Masuk":"ok", "Cancel":"danger", "Ontrack":"pending" };
 
@@ -3350,7 +3376,7 @@ function pipelineCardHTML(label, icon, stats, isAdmin, isAggregate){
         <span style="font-size:11.5px;color:var(--ink-400)">Target</span>
         <b>${fmtJuta(target)}</b>
       </div>
-      ${pipelineSchemeBlockHTML("Laporan Realisasi", "Dari Realisasi saja (tanpa potensi)", "📊", realita, target, "var(--ink-200)")}
+      ${pipelineSchemeBlockHTML("Laporan Realisasi", "Dari Realisasi (tanpa potensi)", "📊", realita, target, "var(--ink-200)")}
       ${pipelineSchemeBlockHTML("Laporan Komitmen", "Dari Realisasi + Total Potensi", "🔮", komitmen, target, "var(--gold-300)")}
       ` : `<div class="hint" style="font-size:11px">Target belum diatur Admin</div>`}
     </div>`;
@@ -5148,13 +5174,20 @@ function pdfPipelineDetail(){
     });
     p.setY(p.getY()+10);
   }
-  drawScheme("Laporan Realisasi — dari Realisasi saja (+ CASA & DPK)", "realita");
+  drawScheme("Laporan Realisasi — dari Realisasi (+ CASA & DPK)", "realita");
   drawScheme("Laporan Komitmen — dari Realisasi + Total Potensi (+ CASA & DPK)", "komitmen");
-  p.sectionTitle(`Daftar Entri Pipeline (sesuai filter aktif — ${filtered.length} entri)`);
-  const cols = [{label:"PIC",w:63},{label:"NASABAH",w:63},{label:"JENIS",w:44},{label:"NO. REK",w:85},{label:"NOMINAL (JUTA)",w:55,align:"right"},{label:"SUMBER",w:46},{label:"TGL",w:60},{label:"STATUS",w:46}];
-  p.tableHeader(cols);
-  [...filtered].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).forEach((e,i)=>{
-    p.tableRow(cols, [e.pic, e.nasabah, e.jenis, e.norek, fmtNumId(e.nominal), e.sumber, e.tanggal, e.status], {zebra:i%2===0});
+  const entryCols = [{label:"PIC",w:104},{label:"NASABAH",w:122},{label:"NO. REK",w:65},{label:"NOMINAL (JUTA)",w:39,align:"right"},{label:"SUMBER",w:69},{label:"TGL",w:52},{label:"STATUS",w:56}];
+  PIPELINE_JENIS.forEach(jenis=>{
+    const rows = filtered.filter(e=>e.jenis===jenis).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+    p.sectionTitle(`Daftar Entri Pipeline — ${jenis} (${rows.length} entri)`);
+    if(!rows.length){ p.paragraph(`Belum ada entri ${jenis} sesuai filter aktif.`, {size:9, color:[130,130,130]}); p.setY(p.getY()+8); return; }
+    p.tableHeader(entryCols);
+    rows.forEach((e,i)=>{
+      p.tableRow(entryCols, [e.pic, e.nasabah, e.norek, fmtNumId(e.nominal), e.sumber, e.tanggal, e.status], {zebra:i%2===0});
+    });
+    const subtotal = rows.reduce((s,e)=>s+Number(e.nominal||0),0);
+    p.paragraph(`Subtotal ${jenis}: ${fmtNumId(subtotal)} juta (${rows.length} entri)`, {bold:true, size:9.5});
+    p.setY(p.getY()+10);
   });
   p.finish(`Detail_PipelineDana_${new Date().toISOString().slice(0,10)}.pdf`);
   toast("PDF detail Pipeline Dana berhasil diunduh", "📄");
@@ -5301,7 +5334,7 @@ async function downloadSummaryPDF(){
     newPage("Pipeline Dana — Tabungan, Giro, Deposito, CASA & DPK");
     const plGroups = [
       ["Tabungan", ["Tabungan"]], ["Giro", ["Giro"]], ["Deposito", ["Deposito"]],
-      ["CASA (Tabungan+Giro)", ["Tabungan","Giro"]], ["DPK (Tab.+Giro+Deposito)", ["Tabungan","Giro","Deposito"]],
+      ["CASA", ["Tabungan","Giro"]], ["DPK", ["Tabungan","Giro","Deposito"]],
     ];
     const plMainCols = [{label:"JENIS",w:105},{label:"POTENSI",w:80,align:"right"},{label:"PIPELINE",w:80,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:"TARGET",w:75,align:"right"},{label:"GAP",w:75,align:"right"}];
     const plCmpCols = [{label:"JENIS",w:105},{label:"MTD",w:135,align:"right"},{label:"YTD",w:135,align:"right"},{label:"YOY",w:135,align:"right"}];
@@ -5327,7 +5360,7 @@ async function downloadSummaryPDF(){
       });
       y += 10;
     }
-    drawPipelineScheme("Laporan Realisasi — dari Realisasi saja", "realita");
+    drawPipelineScheme("Laporan Realisasi — dari Realisasi", "realita");
     drawPipelineScheme("Laporan Komitmen — dari Realisasi + Total Potensi", "komitmen");
 
     const totalPipelineAll = pipelineTotalPipeline(state.pipeline);
@@ -5337,17 +5370,25 @@ async function downloadSummaryPDF(){
     doc.text(`Total Pipeline keseluruhan: ${fmtJuta(totalPipelineAll)}   |   Total Potensi keseluruhan: ${fmtJuta(totalPotensiAll)}   |   ${state.pipeline.length} entri`, MARGIN, y);
     y += 20;
 
-    sectionTitle(`Daftar Lengkap Entri Pipeline (${state.pipeline.length} entri)`);
-    const plDetailCols = [{label:"PIC",w:63},{label:"NASABAH",w:63},{label:"JENIS",w:44},{label:"NO. REK",w:85},{label:"NOMINAL (JUTA)",w:55,align:"right"},{label:"SUMBER",w:46},{label:"TGL",w:60},{label:"STATUS",w:46}];
-    tableHeader(plDetailCols);
-    if(!state.pipeline.length){
-      doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(120,120,120);
-      doc.text("Belum ada laporan pipeline dana.", MARGIN, y); y+=14;
-    } else {
-      [...state.pipeline].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).forEach((e,i)=>{
-        tableRow(plDetailCols, [e.pic, e.nasabah, e.jenis, e.norek, fmtNumId(e.nominal), e.sumber, e.tanggal, e.status], {zebra:i%2===0});
+    const plEntryCols = [{label:"PIC",w:104},{label:"NASABAH",w:122},{label:"NO. REK",w:65},{label:"NOMINAL (JUTA)",w:39,align:"right"},{label:"SUMBER",w:69},{label:"TGL",w:52},{label:"STATUS",w:56}];
+    PIPELINE_JENIS.forEach(jenis=>{
+      const rows = state.pipeline.filter(e=>e.jenis===jenis).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+      sectionTitle(`Daftar Entri Pipeline — ${jenis} (${rows.length} entri)`);
+      if(!rows.length){
+        doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(120,120,120);
+        doc.text(`Belum ada entri ${jenis}.`, MARGIN, y); y+=14;
+        return;
+      }
+      tableHeader(plEntryCols);
+      rows.forEach((e,i)=>{
+        tableRow(plEntryCols, [e.pic, e.nasabah, e.norek, fmtNumId(e.nominal), e.sumber, e.tanggal, e.status], {zebra:i%2===0});
       });
-    }
+      const subtotal = rows.reduce((s,e)=>s+Number(e.nominal||0),0);
+      doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(30,32,38);
+      ensureSpace(16);
+      doc.text(`Subtotal ${jenis}: ${fmtNumId(subtotal)} juta (${rows.length} entri)`, MARGIN, y); y += 16;
+      y += 6;
+    });
 
     newPage("Akuisisi per Produk (Cabang)");
     const prodTotals = CFG.products.map(p=>{
@@ -5740,6 +5781,13 @@ function doLogout(){
   try{
     const saved = JSON.parse(localStorage.getItem("bp11000_session")||"null");
     if(saved && saved.nip){
+      // PENTING: tampilkan indikator loading yang JELAS TERLIHAT selama proses
+      // ini — sebelumnya di sini pengguna hanya melihat layar login diam/beku
+      // tanpa tanda apa pun sedang terjadi (terasa seperti "layar hitam macet"
+      // beberapa detik), padahal sebenarnya sedang mengambil data di latar
+      // belakang. Sekarang ada spinner + teks supaya jelas app sedang bekerja.
+      document.getElementById("loginFormWrap").style.display = "none";
+      document.getElementById("autoLoginOverlay").style.display = "block";
       document.getElementById("loginNIP").value = saved.nip;
       doLoginFlow(saved.nip);
     }

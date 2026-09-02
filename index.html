@@ -935,11 +935,12 @@ function defaultConfig(){
     brandTitle: "Branch Performance",
     brandNumber: "11000",
     brandSubtitle: "Bank Mandiri · Cabang Jambi Gatot Subroto",
-    pipelineTargets: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },
+    pipelineTargets: { "Tabungan": 0, "Giro": 0, "Deposito": 0 }, // format LAMA (global) -- dipertahankan hanya untuk migrasi otomatis, tidak dipakai lagi setelah ada isi di pipelineMonthly
     pipelineRealisasi: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },
-    pipelineMTDBase: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },   // dana di akhir bulan lalu (tahun sama)
-    pipelineYTDBase: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },   // dana di akhir tahun lalu
-    pipelineYOYBase: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },   // dana di bulan sama, tahun lalu
+    pipelineMTDBase: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },
+    pipelineYTDBase: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },
+    pipelineYOYBase: { "Tabungan": 0, "Giro": 0, "Deposito": 0 },
+    pipelineMonthly: {}, // { "<YYYY-MM>": {targets,realisasi,mtdBase,ytdBase,yoyBase} } -- format BARU, terkunci per bulan
     dashboardSectionOrder: ["kpi","teams","topPerTeam","chart","top5","products"],
     pipelineSectionOrder: ["filter","kpi","jenis","target","lapor","list"],
     leaderboardSectionOrder: ["chips","list"],
@@ -1305,7 +1306,8 @@ function keyPenilaian(m){ return `penilaian:${m}`; }
 const KEY_LEADS = "leads:master"; // leads bersifat global (tidak terikat bulan)
 const KEY_MARKETING = "marketing:reports"; // laporan marketing, global (tidak terikat bulan)
 const KEY_INFO = "info:posts"; // pengumuman/info karyawan, global (tidak terikat bulan)
-const KEY_PIPELINE = "pipeline:master"; // pipeline dana, global (tidak terikat bulan)
+const KEY_PIPELINE_LEGACY = "pipeline:master"; // format lama (global, tidak terikat bulan) -- dipakai sebagai fallback migrasi saja
+function keyPipeline(month){ return `pipeline:${month}`; } // format baru: setiap bulan datanya terkunci terpisah, seperti Laporan Akuisisi
 
 /* Setiap jenis data dimuat SECARA TERPISAH (bukan Promise.all yang gagal
    total kalau satu saja gagal) — supaya satu gangguan jaringan kecil pada
@@ -1321,6 +1323,33 @@ async function safeLoadList(key){
     return null; // null = gagal muat, JANGAN timpa data yang sudah ada
   }
 }
+/* Pipeline Dana dulunya SATU daftar global (tidak terkunci per bulan) —
+   sekarang setiap bulan datanya terpisah & terkunci, sama seperti Laporan
+   Akuisisi. Fungsi ini membaca format baru (per bulan) DAN memeriksa format
+   lama (global) sekali untuk memigrasikan entri lama yang tanggalnya cocok
+   dengan bulan ini — supaya data yang sudah pernah diinput sebelum
+   pembaruan ini TIDAK HILANG, otomatis "naik kelas" ke format terkunci per
+   bulan begitu bulan itu pertama kali dibuka lagi. */
+async function loadPipelineForMonth(month){
+  const newKey = keyPipeline(month);
+  const newList = await loadList(newKey); // kalau ini gagal (jaringan), biarkan errornya menjalar (aturan baca aman kita)
+  let legacyList = [];
+  try{ legacyList = await loadList(KEY_PIPELINE_LEGACY); }catch(e){ legacyList = []; } // legacy gagal dibaca -> bukan fatal, anggap tidak ada yang perlu dimigrasikan
+  const newIds = new Set(newList.map(e=>e.id));
+  const legacyForThisMonth = legacyList.filter(e => (e.tanggal||"").slice(0,7)===month && !newIds.has(e.id));
+  if(!legacyForThisMonth.length) return newList;
+  const merged = [...newList, ...legacyForThisMonth];
+  try{ await saveList(newKey, merged); }catch(e){ /* gagal simpan migrasi -- tetap tampilkan gabungannya untuk sesi ini, coba lagi nanti */ }
+  return merged;
+}
+async function safeLoadPipelineForMonth(month){
+  try{
+    return await loadPipelineForMonth(month);
+  }catch(e){
+    window.__storageErrors.push(String(e && e.message || e));
+    return null;
+  }
+}
 async function loadMonthData(){
   const [r,l,p,ld,inf,pl,mk] = await Promise.all([
     safeLoadList(keyReports(state.month)),
@@ -1328,7 +1357,7 @@ async function loadMonthData(){
     safeLoadList(keyPenilaian(state.month)),
     safeLoadList(KEY_LEADS),
     safeLoadList(KEY_INFO),
-    safeLoadList(KEY_PIPELINE),
+    safeLoadPipelineForMonth(state.month),
     safeLoadList(KEY_MARKETING),
   ]);
   if(r !== null) state.reports = r;
@@ -3095,22 +3124,22 @@ function renderPipeline(){
     <h2 class="sec">Potensi, Realisasi &amp; Pipeline per Jenis Rekening <span class="line"></span></h2>
     <div class="grid cols-3" id="pipelineJenisCards"></div>`,
     target: isAdmin ? `
-    <h2 class="sec">🎯 Target, Realisasi &amp; Pembanding (khusus Admin) <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">Gap = (Realisasi + Total Potensi) &minus; Target</span></h2>
+    <h2 class="sec">🎯 Target, Realisasi &amp; Pembanding (khusus Admin) <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">Gap = (Realisasi + Total Potensi) &minus; Target &middot; terkunci per bulan: ${monthLabel()}</span></h2>
     <div class="card glow" style="margin-bottom:8px">
-      <p class="hint" style="margin-bottom:16px">Gap, MTD, YTD, YOY semua dihitung dari basis yang sama: <b>Realisasi + Total Potensi</b>. Gap = itu &minus; Target. MTD = itu &minus; dana bulan lalu. YTD = itu &minus; dana akhir tahun lalu. YOY = itu &minus; dana bulan yang sama tahun lalu.</p>
+      <p class="hint" style="margin-bottom:16px">Gap, MTD, YTD, YOY semua dihitung dari basis yang sama: <b>Realisasi + Total Potensi</b>. Gap = itu &minus; Target. MTD = itu &minus; dana bulan lalu. YTD = itu &minus; dana akhir tahun lalu. YOY = itu &minus; dana bulan yang sama tahun lalu. <b>Nilai di bawah ini khusus untuk bulan ${monthLabel()}</b> — ganti bulan di atas untuk mengisi bulan lain, data tiap bulan tersimpan terpisah dan tidak akan saling menimpa.</p>
       <div class="grid cols-3" style="gap:14px">
-        ${PIPELINE_JENIS.map(j=>`
+        ${(()=>{ const mCfg = getPipelineMonthCfg(state.month); return PIPELINE_JENIS.map(j=>`
           <div>
             <h3 class="sub" style="font-size:13px;margin-bottom:10px">${j}</h3>
-            <div class="field"><label>Target (juta)</label><input type="number" min="0" id="pt_${j}" value="${CFG.pipelineTargets[j]||0}"></div>
-            <div class="field"><label>Realisasi (juta)</label><input type="number" min="0" id="pr_${j}" value="${CFG.pipelineRealisasi[j]||0}"></div>
-            <div class="field"><label>Bulan Lalu (juta)</label><input type="number" min="0" id="pmtd_${j}" value="${CFG.pipelineMTDBase[j]||0}"></div>
-            <div class="field"><label>Akhir Tahun Lalu (juta)</label><input type="number" min="0" id="pytd_${j}" value="${CFG.pipelineYTDBase[j]||0}"></div>
-            <div class="field"><label>Bulan Tahun Lalu (juta)</label><input type="number" min="0" id="pyoy_${j}" value="${CFG.pipelineYOYBase[j]||0}"></div>
+            <div class="field"><label>Target (juta)</label><input type="number" min="0" id="pt_${j}" value="${mCfg.targets[j]||0}"></div>
+            <div class="field"><label>Realisasi (juta)</label><input type="number" min="0" id="pr_${j}" value="${mCfg.realisasi[j]||0}"></div>
+            <div class="field"><label>Bulan Lalu (juta)</label><input type="number" min="0" id="pmtd_${j}" value="${mCfg.mtdBase[j]||0}"></div>
+            <div class="field"><label>Akhir Tahun Lalu (juta)</label><input type="number" min="0" id="pytd_${j}" value="${mCfg.ytdBase[j]||0}"></div>
+            <div class="field"><label>Bulan Tahun Lalu (juta)</label><input type="number" min="0" id="pyoy_${j}" value="${mCfg.yoyBase[j]||0}"></div>
           </div>
-        `).join("")}
+        `).join(""); })()}
       </div>
-      <button class="btn primary" id="pipelineTargetSaveBtn" style="margin-top:6px">💾 Simpan Semua</button>
+      <button class="btn primary" id="pipelineTargetSaveBtn" style="margin-top:6px">💾 Simpan Semua (untuk ${monthLabel()})</button>
     </div>` : ``,
     lapor: `
     <h2 class="sec">📝 Lapor Komitmen Baru <span class="line"></span></h2>
@@ -3191,7 +3220,7 @@ function renderPipeline(){
       status: document.getElementById("pl_status").value,
       createdAt: Date.now(),
     };
-    const ok = await mutateAndSave(KEY_PIPELINE, "pipeline", (fresh)=>{ fresh.push(entry); });
+    const ok = await mutateAndSave(keyPipeline(state.month), "pipeline", (fresh)=>{ fresh.push(entry); });
     if(!ok){ toast("Gagal menyimpan, coba lagi", "⚠️"); return; }
     toast("Laporan pipeline terkirim", "🎉");
     playSound("bell");
@@ -3212,15 +3241,16 @@ function renderPipeline(){
         newYTD[j] = Number(document.getElementById(`pytd_${j}`).value||0);
         newYOY[j] = Number(document.getElementById(`pyoy_${j}`).value||0);
       });
+      const savingMonth = state.month; // simpan referensinya sekarang, kalau-kalau pengguna ganti bulan sebelum simpan selesai
       const ok = await mutateConfigAndSave((cfg)=>{
-        cfg.pipelineTargets = newTargets;
-        cfg.pipelineRealisasi = newRealisasi;
-        cfg.pipelineMTDBase = newMTD;
-        cfg.pipelineYTDBase = newYTD;
-        cfg.pipelineYOYBase = newYOY;
+        if(!cfg.pipelineMonthly) cfg.pipelineMonthly = {};
+        cfg.pipelineMonthly[savingMonth] = {
+          targets: newTargets, realisasi: newRealisasi,
+          mtdBase: newMTD, ytdBase: newYTD, yoyBase: newYOY,
+        };
       });
       if(!ok){ toast("Gagal menyimpan, coba lagi", "⚠️"); return; }
-      toast("Target, Realisasi & Pembanding berhasil disimpan", "✅");
+      toast(`Target, Realisasi & Pembanding untuk ${monthLabelOf(savingMonth)} berhasil disimpan`, "✅");
       playSound("bell");
       if(state.tab !== "pipeline") return;
       refreshPipelineView();
@@ -3291,15 +3321,50 @@ function drawPipelineKpiCards(filtered){
   `;
 }
 
+/* Nilai default kosong untuk konfigurasi Pipeline Dana satu bulan (Target,
+   Realisasi, dan basis pembanding MTD/YTD/YOY). */
+function defaultPipelineMonthCfg(){
+  return {
+    targets: {"Tabungan":0,"Giro":0,"Deposito":0},
+    realisasi: {"Tabungan":0,"Giro":0,"Deposito":0},
+    mtdBase: {"Tabungan":0,"Giro":0,"Deposito":0},
+    ytdBase: {"Tabungan":0,"Giro":0,"Deposito":0},
+    yoyBase: {"Tabungan":0,"Giro":0,"Deposito":0},
+  };
+}
+/* Ambil konfigurasi Pipeline Dana KHUSUS untuk satu bulan — inilah yang
+   membuat Target/Realisasi/MTD/YTD/YOY "terkunci" per bulan, sama seperti
+   Laporan Akuisisi, alih-alih satu nilai global yang dulu dipakai bersama
+   oleh semua bulan (itu sebabnya dulu data terlihat "tertimpa" tiap ganti
+   bulan). Migrasi otomatis: kalau belum ada satu bulan pun yang punya data
+   di format baru, TAPI field lama (global) punya isi, anggap itu data milik
+   bulan yang pertama kali dibuka setelah pembaruan ini (murni untuk baca —
+   baru benar-benar tersimpan ke format baru saat Admin klik "Simpan"). */
+function getPipelineMonthCfg(month){
+  if(CFG.pipelineMonthly && CFG.pipelineMonthly[month]) return CFG.pipelineMonthly[month];
+  const hasAnyMonthly = CFG.pipelineMonthly && Object.keys(CFG.pipelineMonthly).length > 0;
+  const legacyHasData = CFG.pipelineTargets && Object.values(CFG.pipelineTargets).some(v=>v>0);
+  if(!hasAnyMonthly && legacyHasData){
+    return {
+      targets: {...CFG.pipelineTargets},
+      realisasi: {...CFG.pipelineRealisasi},
+      mtdBase: {...CFG.pipelineMTDBase},
+      ytdBase: {...CFG.pipelineYTDBase},
+      yoyBase: {...CFG.pipelineYOYBase},
+    };
+  }
+  return defaultPipelineMonthCfg();
+}
 function pipelineGroupStats(entries, jenisList){
   const scoped = entries.filter(e=>jenisList.includes(e.jenis));
   const potensi = pipelineTotalPotensi(scoped);
   const pipelineTotal = pipelineTotalPipeline(scoped);
-  const target = jenisList.reduce((s,j)=>s+(CFG.pipelineTargets[j]||0),0);
-  const realisasi = jenisList.reduce((s,j)=>s+(CFG.pipelineRealisasi[j]||0),0);
-  const mtdBase = jenisList.reduce((s,j)=>s+(CFG.pipelineMTDBase[j]||0),0);
-  const ytdBase = jenisList.reduce((s,j)=>s+(CFG.pipelineYTDBase[j]||0),0);
-  const yoyBase = jenisList.reduce((s,j)=>s+(CFG.pipelineYOYBase[j]||0),0);
+  const mCfg = getPipelineMonthCfg(state.month);
+  const target = jenisList.reduce((s,j)=>s+(mCfg.targets[j]||0),0);
+  const realisasi = jenisList.reduce((s,j)=>s+(mCfg.realisasi[j]||0),0);
+  const mtdBase = jenisList.reduce((s,j)=>s+(mCfg.mtdBase[j]||0),0);
+  const ytdBase = jenisList.reduce((s,j)=>s+(mCfg.ytdBase[j]||0),0);
+  const yoyBase = jenisList.reduce((s,j)=>s+(mCfg.yoyBase[j]||0),0);
   const combined = realisasi + potensi; // Realisasi + Total Potensi
 
   // SKEMA 1 — LAPORAN REALITA: murni dari Realisasi saja (tanpa potensi).
@@ -3438,7 +3503,7 @@ function drawPipelineList(filtered){
     box.querySelectorAll("[data-pl-del]").forEach(b=>b.onclick=async()=>{
       const id = b.dataset.plDel;
       if(!confirm("Hapus entri pipeline ini?")) return;
-      await mutateAndSave(KEY_PIPELINE, "pipeline", (fresh)=>{
+      await mutateAndSave(keyPipeline(state.month), "pipeline", (fresh)=>{
         const idx = fresh.findIndex(x=>x.id===id);
         if(idx>=0) fresh.splice(idx,1);
       });
@@ -3499,7 +3564,7 @@ function openEditPipeline(id){
       tanggal: document.getElementById("ep_tanggal").value,
       status: document.getElementById("ep_status").value,
     };
-    await mutateAndSave(KEY_PIPELINE, "pipeline", (fresh)=>{
+    await mutateAndSave(keyPipeline(state.month), "pipeline", (fresh)=>{
       const target = fresh.find(x=>x.id===entry.id);
       if(target) Object.assign(target, edits);
     });
@@ -3556,7 +3621,7 @@ function openEditPipelineKaryawan(id){
       tanggal: document.getElementById("ek_tanggal").value,
       status: document.getElementById("ek_status").value,
     };
-    await mutateAndSave(KEY_PIPELINE, "pipeline", (fresh)=>{
+    await mutateAndSave(keyPipeline(state.month), "pipeline", (fresh)=>{
       const target = fresh.find(x=>x.id===entry.id);
       if(target) Object.assign(target, edits);
     });
@@ -5538,7 +5603,7 @@ async function doLoginFlow(nip){
   // data bulan ini) jadi SATU request batch di awal, alih-alih ±16 request
   // terpisah — Apps Script punya jeda/overhead per-request yang cukup
   // terasa, jadi ini yang paling besar pengaruhnya ke kecepatan login.
-  const rMonth = keyReports(state.month), lMonth = keyLayanan(state.month), pMonth = keyPenilaian(state.month);
+  const rMonth = keyReports(state.month), lMonth = keyLayanan(state.month), pMonth = keyPenilaian(state.month), plMonth = keyPipeline(state.month);
   await preloginBatchFetch([
     KEY_CONFIG, `${KEY_CONFIG}::c0`,
     rMonth, `${rMonth}::c0`,
@@ -5546,7 +5611,8 @@ async function doLoginFlow(nip){
     pMonth, `${pMonth}::c0`,
     KEY_LEADS, `${KEY_LEADS}::c0`,
     KEY_INFO, `${KEY_INFO}::c0`,
-    KEY_PIPELINE, `${KEY_PIPELINE}::c0`,
+    plMonth, `${plMonth}::c0`,
+    KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`,
     KEY_MARKETING, `${KEY_MARKETING}::c0`,
   ]);
   // Jaring pengaman: kalau memuat data macet (mis. koneksi lambat / backend
@@ -5672,7 +5738,14 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
       const hash = await sha256Hex(pw);
       const auth = (CFG.userAuth||{})[loginPendingNip];
       if(!auth || hash !== auth.passwordHash){ toast("Password salah, coba lagi", "⚠️"); return; }
-      await recordLoginActivity(loginPendingNip);
+      // PENTING (kecepatan login): JANGAN "await" di sini — mencatat aktivitas
+      // login itu cuma pembukuan, bukan sesuatu yang harus selesai dulu sebelum
+      // pengguna masuk ke dashboard. Kalau di-await, itu jadi satu ROUND-TRIP
+      // JARINGAN PENUH (ambil+simpan config) yang WAJIB selesai duluan sebelum
+      // proses login utama (yang sudah dioptimalkan jadi 1 permintaan gabungan)
+      // bahkan MULAI — inilah penyebab jeda tambahan yang terasa setelah
+      // memasukkan password. Sekarang berjalan di latar belakang saja.
+      recordLoginActivity(loginPendingNip);
       await doLoginFlow(loginPendingNip);
       resetLoginStage();
       return;

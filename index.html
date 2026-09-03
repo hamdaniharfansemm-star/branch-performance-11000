@@ -1007,7 +1007,18 @@ const MONTHS = (function(){
 const state = {
   role: "karyawan", // karyawan | admin
   nip: null,
-  month: "2026-08", // bulan data awal (Agustus 2026)
+  // Bulan default = BULAN BERJALAN SEKARANG (bukan angka tetap) — supaya
+  // begitu login, yang langsung tampil adalah pencapaian bulan ini, bukan
+  // bulan lama. Kalau tanggal perangkat berada di luar rentang tahun yang
+  // didukung (YEAR_MIN s.d. +2), jatuh kembali ke Agustus 2026 sebagai
+  // titik aman. Pengguna tetap bisa cari bulan lain kapan saja lewat
+  // dropdown Bulan/Tahun di atas.
+  month: (function(){
+    const now = new Date();
+    const y = now.getFullYear();
+    if(y < YEAR_MIN || y > YEAR_MIN+2) return "2026-08";
+    return monthKeyOf(y, now.getMonth()+1);
+  })(),
   tab: "dashboard",
   reports: [],   // sheet1 daily acquisition reports
   layanan: [],   // sheet2 daily service metrics
@@ -4783,12 +4794,34 @@ for(let y=YEAR_MIN; y<=YEAR_MAX; y++){
 }
 async function onPeriodChange(){
   state.month = monthKeyOf(parseInt(yearSelect.value,10), parseInt(monthSelect.value,10));
+  // Beri tahu pengguna SEKETIKA bahwa proses ganti bulan sedang berjalan —
+  // sebelumnya tidak ada tanda apa pun selama beberapa detik, terasa
+  // seperti macet/nge-freeze padahal sedang memuat data di latar belakang.
+  monthSelect.disabled = true; yearSelect.disabled = true;
+  toast(`Memuat data ${monthLabel()}...`, "⏳");
   try{
+    // PERCEPAT: gabungkan SEMUA key data bulan ini jadi satu permintaan,
+    // sama seperti optimasi login — daripada sampai ±14 permintaan terpisah
+    // (7 jenis data x sampai 2 masing-masing), sekarang cukup 1 permintaan
+    // gabungan sebelum loadMonthData() jalan seperti biasa.
+    const rMonth = keyReports(state.month), lMonth = keyLayanan(state.month), pMonth = keyPenilaian(state.month), plMonth = keyPipeline(state.month);
+    await preloginBatchFetch([
+      rMonth, `${rMonth}::c0`,
+      lMonth, `${lMonth}::c0`,
+      pMonth, `${pMonth}::c0`,
+      KEY_LEADS, `${KEY_LEADS}::c0`,
+      KEY_INFO, `${KEY_INFO}::c0`,
+      plMonth, `${plMonth}::c0`,
+      KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`,
+      KEY_MARKETING, `${KEY_MARKETING}::c0`,
+    ]);
     await loadMonthData();
     toast(`Menampilkan data ${monthLabel()}`, "🗓️");
   }catch(e){
     toast("Gagal memuat data periode ini, coba lagi", "⚠️");
   }
+  __loginPrefetchCache = null; // cache sekali pakai -- kosongkan lagi supaya simpan/muat berikutnya selalu ambil data terbaru
+  monthSelect.disabled = false; yearSelect.disabled = false;
   document.getElementById("pdfMonthLabel").textContent = monthLabel();
   render();
 }

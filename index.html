@@ -1153,11 +1153,21 @@ async function fetchRaw(key){
   }
   if(APPS_SCRIPT_URL){
     try{
-      const res = await fetch(`${APPS_SCRIPT_URL}?key=${encodeURIComponent(key)}`);
+      // PENTING: batasi waktu tunggu supaya request TIDAK PERNAH menggantung
+      // selamanya kalau server lambat merespons/macet (mis. Apps Script
+      // butuh otorisasi ulang, sinyal hilang, dsb). Ini fungsi PALING SERING
+      // dipakai di seluruh aplikasi (dipanggil untuk baca APA SAJA), jadi
+      // kalau fungsi ini menggantung, SELURUH aplikasi ikut menggantung —
+      // termasuk tombol login yang macet selamanya di "Memuat...".
+      const controller = new AbortController();
+      const timer = setTimeout(()=> controller.abort(), 12000);
+      const res = await fetch(`${APPS_SCRIPT_URL}?key=${encodeURIComponent(key)}`, {signal: controller.signal});
+      clearTimeout(timer);
       const data = await res.json();
       return (data && data.value != null) ? data.value : null;
     }catch(e){
-      window.__storageErrors.push(String(e && e.message || e));
+      const isTimeout = e && e.name === "AbortError";
+      window.__storageErrors.push(isTimeout ? `Waktu tunggu habis mengambil "${key}" (server tidak merespons dalam 12 detik)` : String(e && e.message || e));
       // PENTING: lempar ulang error ini (jangan kembalikan null begitu saja).
       // null harus HANYA berarti "key ini memang belum ada", bukan "gagal
       // mengambil data" — kalau dua kondisi ini dicampur, kode yang menyimpan
@@ -1176,13 +1186,23 @@ async function fetchRaw(key){
 async function saveRaw(key, valueStr){
   if(APPS_SCRIPT_URL){
     try{
+      // Sama seperti fetchRaw: batasi waktu tunggu supaya tombol simpan tidak
+      // pernah macet selamanya kalau server lambat merespons.
+      const controller = new AbortController();
+      const timer = setTimeout(()=> controller.abort(), 15000);
       await fetch(APPS_SCRIPT_URL, {
         method:"POST",
         headers:{"Content-Type":"text/plain;charset=utf-8"}, // hindari CORS preflight ke Apps Script
-        body: JSON.stringify({key, value: valueStr})
+        body: JSON.stringify({key, value: valueStr}),
+        signal: controller.signal,
       });
+      clearTimeout(timer);
       return true;
-    }catch(e){ window.__storageErrors.push(String(e && e.message || e)); return false; }
+    }catch(e){
+      const isTimeout = e && e.name === "AbortError";
+      window.__storageErrors.push(isTimeout ? `Waktu tunggu habis menyimpan "${key}" (server tidak merespons dalam 15 detik)` : String(e && e.message || e));
+      return false;
+    }
   }
   try{
     const r = await window.storage.set(key, valueStr, true);
@@ -1192,11 +1212,15 @@ async function saveRaw(key, valueStr){
 async function deleteRaw(key){
   if(APPS_SCRIPT_URL){
     try{
+      const controller = new AbortController();
+      const timer = setTimeout(()=> controller.abort(), 15000);
       await fetch(APPS_SCRIPT_URL, {
         method:"POST",
         headers:{"Content-Type":"text/plain;charset=utf-8"},
-        body: JSON.stringify({action:"delete", key})
+        body: JSON.stringify({action:"delete", key}),
+        signal: controller.signal,
       });
+      clearTimeout(timer);
       return true;
     }catch(e){ return false; }
   }

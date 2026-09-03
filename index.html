@@ -1127,6 +1127,28 @@ async function recordLoginActivity(nip){
     });
   }catch(e){ /* best-effort */ }
 }
+/* Kalau server (Apps Script) mengembalikan sesuatu yang BUKAN JSON (paling
+   sering: halaman HTML "otorisasi diperlukan" dari Google, bukan data
+   sungguhan), res.json() akan gagal dengan pesan teknis yang membingungkan
+   ("unexpected character..."). Fungsi ini mendeteksi kondisi itu secara
+   spesifik dan memberi pesan yang jelas & bisa ditindaklanjuti, supaya
+   Admin tahu PERSIS apa yang harus dilakukan (bukan cuma pesan teknis).
+   PENTING: ini TIDAK ADA HUBUNGANNYA dengan "sedang login di perangkat
+   lain" — aplikasi ini tidak membatasi akses berdasarkan perangkat sama
+   sekali; setiap perangkat membaca/menulis ke Google Sheet yang sama secara
+   independen dan aman. */
+async function parseServerJson(res){
+  const text = await res.text();
+  try{
+    return JSON.parse(text);
+  }catch(e){
+    const looksLikeAuthPage = /accounts\.google\.com|authorization|sign in|<html/i.test(text);
+    if(looksLikeAuthPage){
+      throw new Error("Server Apps Script meminta OTORISASI ULANG (bukan mengembalikan data) — Admin perlu membuka Apps Script, jalankan salah satu fungsi secara manual, izinkan semua permintaan akses yang muncul, lalu Deploy > Manage deployments > buat versi baru.");
+    }
+    throw new Error("Server mengembalikan data yang tidak bisa dibaca (bukan JSON): " + text.slice(0,120));
+  }
+}
 async function sendResetEmail(to, subject, body){
   if(!APPS_SCRIPT_URL) return false; // mode window.storage (tanpa Apps Script) tidak bisa kirim email sungguhan
   try{
@@ -1138,7 +1160,7 @@ async function sendResetEmail(to, subject, body){
       signal: controller.signal,
     });
     clearTimeout(timer);
-    const data = await res.json();
+    const data = await parseServerJson(res);
     return !!(data && data.ok);
   }catch(e){ return false; }
 }
@@ -1154,7 +1176,7 @@ async function preloginBatchFetch(keys){
     const timer = setTimeout(()=> controller.abort(), 6000);
     const res = await fetch(`${APPS_SCRIPT_URL}?keys=${encodeURIComponent(keys.join(","))}`, {signal: controller.signal});
     clearTimeout(timer);
-    const data = await res.json();
+    const data = await parseServerJson(res);
     __loginPrefetchCache = new Map(Object.entries(data.values || {}));
   }catch(e){
     // Gagal prefetch -- tidak apa-apa, biarkan null supaya fetchRaw() jalan
@@ -1178,7 +1200,7 @@ async function fetchRaw(key){
       const timer = setTimeout(()=> controller.abort(), 12000);
       const res = await fetch(`${APPS_SCRIPT_URL}?key=${encodeURIComponent(key)}`, {signal: controller.signal});
       clearTimeout(timer);
-      const data = await res.json();
+      const data = await parseServerJson(res);
       return (data && data.value != null) ? data.value : null;
     }catch(e){
       const isTimeout = e && e.name === "AbortError";
@@ -1500,6 +1522,41 @@ async function loadMonthData(){
   if(pl !== null) state.pipeline = pl;
   if(mk !== null) state.marketing = mk;
   rebuildIndex();
+}
+/* PERCEPAT LOGIN: versi "penting saja" dari loadMonthData — dipakai KHUSUS
+   saat login pertama kali, supaya Dashboard bisa tampil secepat mungkin.
+   Leads & Info TIDAK ikut menunggu di sini (keduanya tidak tampil di
+   Dashboard sama sekali) — keduanya dimuat belakangan di latar belakang
+   sesaat setelah login selesai, jadi biasanya sudah siap begitu pengguna
+   benar-benar membuka tab Leads/Informasi, tanpa ikut memperlambat login. */
+async function loadEssentialMonthData(){
+  const [r,l,p,pl,mk] = await Promise.all([
+    safeLoadList(keyReports(state.month)),
+    safeLoadList(keyLayanan(state.month)),
+    safeLoadList(keyPenilaian(state.month)),
+    safeLoadPipelineForMonth(state.month),
+    safeLoadMarketingForMonth(state.month),
+  ]);
+  if(r !== null) state.reports = r;
+  if(l !== null) state.layanan = l;
+  if(p !== null) state.penilaian = p;
+  if(pl !== null) state.pipeline = pl;
+  if(mk !== null) state.marketing = mk;
+  rebuildIndex();
+}
+function loadNonEssentialDataInBackground(){
+  Promise.all([
+    safeLoadList(KEY_LEADS),
+    safeLoadList(KEY_INFO),
+  ]).then(([ld, inf])=>{
+    if(ld !== null) state.leads = ld;
+    if(inf !== null) state.info = inf;
+    // Kalau pengguna KEBETULAN sedang membuka tab Leads/Informasi saat data
+    // ini baru selesai dimuat, gambar ulang supaya langsung terlihat --
+    // tanpa ini, data baru ada di memori tapi layar belum ikut berubah
+    // sampai pengguna pindah tab lalu kembali lagi.
+    if(state.tab === "leads" || state.tab === "info") render();
+  }).catch(()=>{});
 }
 
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
@@ -3529,8 +3586,9 @@ function pipelineGroupStats(entries, jenisList){
     yoy: realisasi - yoyBase,
     pct: komitmenVal>0 ? realisasi/komitmenVal*100 : 0,
   };
-  // SKEMA C — LAPORAN KECUKUPAN DANA (dulu bernama "Laporan Komitmen"):
-  // Realisasi + Total Potensi (potensi ikut dihitung) dibandingkan TARGET.
+  // SKEMA C — LAPORAN KECUKUPAN POTENSI DANA MASUK terhadap TARGET (dulu
+  // bernama "Laporan Komitmen"): Realisasi + Total Potensi (potensi ikut
+  // dihitung) dibandingkan TARGET.
   const kecukupan = {
     gap: combined - target,
     mtd: combined - mtdBase,
@@ -3538,9 +3596,19 @@ function pipelineGroupStats(entries, jenisList){
     yoy: combined - yoyBase,
     pct: target>0 ? combined/target*100 : 0,
   };
+  // SKEMA D — LAPORAN KECUKUPAN POTENSI DANA MASUK terhadap KOMITMEN (baru):
+  // sama seperti Skema C (Realisasi + Total Potensi), tapi dibandingkan
+  // dengan KOMITMEN, bukan Target.
+  const kecukupanKomitmen = {
+    gap: combined - komitmenVal,
+    mtd: combined - mtdBase,
+    ytd: combined - ytdBase,
+    yoy: combined - yoyBase,
+    pct: komitmenVal>0 ? combined/komitmenVal*100 : 0,
+  };
 
-  return {potensi, pipelineTotal, target, komitmenVal, realisasi, combined, mtdBase, ytdBase, yoyBase, realita, komitmen, kecukupan,
-    // alias lama (dipakai kode lain seperti label ringkasan) -> mengikuti skema Kecukupan Dana
+  return {potensi, pipelineTotal, target, komitmenVal, realisasi, combined, mtdBase, ytdBase, yoyBase, realita, komitmen, kecukupan, kecukupanKomitmen,
+    // alias lama (dipakai kode lain seperti label ringkasan) -> mengikuti skema Kecukupan Dana terhadap Target
     gap: kecukupan.gap, mtd: kecukupan.mtd, ytd: kecukupan.ytd, yoy: kecukupan.yoy};
 }
 function pipelineSchemeBlockHTML(title, subtitle, icon, sch, target, badgeCls, baseLabel){
@@ -3571,7 +3639,7 @@ function pipelineSchemeBlockHTML(title, subtitle, icon, sch, target, badgeCls, b
     </div>`;
 }
 function pipelineCardHTML(label, icon, stats, isAdmin, isAggregate){
-  const {potensi, pipelineTotal, target, komitmenVal, realisasi, combined, realita, komitmen, kecukupan} = stats;
+  const {potensi, pipelineTotal, target, komitmenVal, realisasi, combined, realita, komitmen, kecukupan, kecukupanKomitmen} = stats;
   return `
     <div class="card glow${isAggregate?' pipeline-agg-card':''}">
       <div class="orb o-gold"></div>
@@ -3603,7 +3671,8 @@ function pipelineCardHTML(label, icon, stats, isAdmin, isAggregate){
       </div>
       ${pipelineSchemeBlockHTML("Laporan Realisasi", "Realisasi vs Target", "📊", realita, target, "var(--ink-200)", "target")}
       ${pipelineSchemeBlockHTML("Laporan Komitmen", "Realisasi vs Komitmen", "🤝", komitmen, komitmenVal, "var(--blue-400)", "komitmen")}
-      ${pipelineSchemeBlockHTML("Laporan Kecukupan Dana", "(Realisasi + Total Potensi) vs Target", "🔮", kecukupan, target, "var(--gold-300)", "target")}
+      ${pipelineSchemeBlockHTML("Laporan Kecukupan Potensi Dana Masuk (vs Target)", "(Realisasi + Total Potensi) vs Target", "🔮", kecukupan, target, "var(--gold-300)", "target")}
+      ${pipelineSchemeBlockHTML("Laporan Kecukupan Potensi Dana Masuk (vs Komitmen)", "(Realisasi + Total Potensi) vs Komitmen", "💎", kecukupanKomitmen, komitmenVal, "#c586ff", "komitmen")}
       ` : `<div class="hint" style="font-size:11px">Target belum diatur Admin</div>`}
     </div>`;
 }
@@ -4593,7 +4662,7 @@ async function checkStoredData(){
     const timer = setTimeout(()=> controller.abort(), 15000);
     const res = await fetch(`${APPS_SCRIPT_URL}?listkeys=1`, {signal: controller.signal});
     clearTimeout(timer);
-    const data = await res.json();
+    const data = await parseServerJson(res);
     const keys = data.keys || [];
     if(!keys.length){
       box.innerHTML = `<p class="hint" style="color:var(--danger)">Tidak ditemukan data apa pun di server (sheet KV_STORE kosong).</p>`;
@@ -4786,7 +4855,15 @@ async function decideReport(id, status){
   rebuildIndex();
   toast(status==="approved" ? `Laporan ${r.employee} disetujui` : `Laporan ${r.employee} ditolak`, status==="approved"?"✅":"🚫");
   playFanfare(status==="approved" ? "success" : "reject");
-  if(state.tab === "admin") renderAdmin();
+  // PERCEPAT: dulu ini memanggil renderAdmin() penuh (menyusun ULANG SELURUH
+  // halaman Admin — Kelola Karyawan, Produk, Tim, tata letak, akun pengguna,
+  // dst — padahal yang berubah cuma satu baris di daftar approval). Sekarang
+  // cukup gambar ulang daftar approval-nya saja, jauh lebih ringan & terasa
+  // seketika.
+  if(state.tab === "admin" && document.getElementById("adminList")){
+    const allNow = [...(state._dupMarked||markDuplicates(state.reports))].sort((a,b)=>b.createdAt-a.createdAt);
+    renderAdminList(allNow);
+  }
 }
 function renderAdminList(all){
   const box = document.getElementById("adminList");
@@ -4858,7 +4935,10 @@ function openEditReport(id){
     rebuildIndex();
     toast("Laporan berhasil diperbarui", "✅");
     closeModal();
-    if(state.tab === "admin") renderAdmin();
+    if(state.tab === "admin" && document.getElementById("adminList")){
+      const allNow = [...(state._dupMarked||markDuplicates(state.reports))].sort((a,b)=>b.createdAt-a.createdAt);
+      renderAdminList(allNow);
+    }
   };
 }
 async function deleteReport(id){
@@ -4871,7 +4951,10 @@ async function deleteReport(id){
   rebuildIndex();
   toast(`Laporan ${r.employee} dihapus`, "🗑️");
   playFanfare("reject");
-  if(state.tab === "admin") renderAdmin();
+  if(state.tab === "admin" && document.getElementById("adminList")){
+    const allNow = [...(state._dupMarked||markDuplicates(state.reports))].sort((a,b)=>b.createdAt-a.createdAt);
+    renderAdminList(allNow);
+  }
 }
 function exportReportsCSV(){
   const marked = state._dupMarked || markDuplicates(state.reports);
@@ -4923,22 +5006,20 @@ async function onPeriodChange(){
   toast(`Memuat data ${monthLabel()}...`, "⏳");
   try{
     // PERCEPAT: gabungkan SEMUA key data bulan ini jadi satu permintaan,
-    // sama seperti optimasi login — daripada sampai ±14 permintaan terpisah
-    // (7 jenis data x sampai 2 masing-masing), sekarang cukup 1 permintaan
-    // gabungan sebelum loadMonthData() jalan seperti biasa.
+    // sama seperti optimasi login. Leads & Informasi TIDAK ikut di sini —
+    // keduanya bersifat GLOBAL (tidak terikat bulan), jadi tidak perlu
+    // diambil ulang setiap ganti bulan; yang sudah ada di memori tetap valid.
     const rMonth = keyReports(state.month), lMonth = keyLayanan(state.month), pMonth = keyPenilaian(state.month), plMonth = keyPipeline(state.month), mMonth = keyMarketing(state.month);
     await preloginBatchFetch([
       rMonth, `${rMonth}::c0`,
       lMonth, `${lMonth}::c0`,
       pMonth, `${pMonth}::c0`,
-      KEY_LEADS, `${KEY_LEADS}::c0`,
-      KEY_INFO, `${KEY_INFO}::c0`,
       plMonth, `${plMonth}::c0`,
       KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`,
       mMonth, `${mMonth}::c0`,
       KEY_MARKETING_LEGACY, `${KEY_MARKETING_LEGACY}::c0`,
     ]);
-    await loadMonthData();
+    await loadEssentialMonthData();
     toast(`Menampilkan data ${monthLabel()}`, "🗓️");
   }catch(e){
     toast("Gagal memuat data periode ini, coba lagi", "⚠️");
@@ -5454,7 +5535,7 @@ function pdfPipelineDetail(){
   ];
   const cmpCols = [{label:"JENIS",w:105},{label:"MTD",w:135,align:"right"},{label:"YTD",w:135,align:"right"},{label:"YOY",w:135,align:"right"}];
   function mkMainCols(baseLabel){ return [{label:"JENIS",w:105},{label:"POTENSI",w:80,align:"right"},{label:"PIPELINE",w:80,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:baseLabel,w:75,align:"right"},{label:"GAP",w:75,align:"right"}]; }
-  function drawScheme(title, subtitle, schemeKey, baseField, baseLabel){
+  function drawScheme(title, subtitle, schemeKey, baseField, baseLabel, usesPotensi){
     p.sectionTitle(title);
     p.paragraph(`${subtitle} — semua nilai dalam juta rupiah.`, {size:8, color:[130,130,130]});
     const mainCols = mkMainCols(baseLabel);
@@ -5464,7 +5545,12 @@ function pdfPipelineDetail(){
       const sch = st[schemeKey];
       const base = st[baseField];
       const pct = base>0 ? (sch.gap+base)/base*100 : 0;
-      p.tableRow(mainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(base), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
+      // Potensi & Pipeline HANYA relevan untuk skema yang benar-benar memakainya
+      // (Kecukupan Dana = Realisasi + Potensi). Untuk skema Realisasi vs Target
+      // dan Realisasi vs Komitmen, keduanya murni dari Realisasi saja — jadi
+      // Potensi/Pipeline ditampilkan 0 di laporan itu supaya tidak menyesatkan
+      // (seolah-olah ikut dihitung padahal tidak).
+      p.tableRow(mainCols, [label, usesPotensi?fmtNumId(st.potensi):"0", usesPotensi?fmtNumId(st.pipelineTotal):"0", fmtNumId(st.realisasi), fmtNumId(base), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
         {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK, base>0?pdfAchievementColor(pct):PDF_BLACK], dots: base>0 ? {5: pdfAchievementColor(pct)} : null});
     });
     p.setY(p.getY()+8);
@@ -5477,9 +5563,10 @@ function pdfPipelineDetail(){
     });
     p.setY(p.getY()+10);
   }
-  drawScheme("Laporan Realisasi (+ CASA & DPK)", "Realisasi vs Target", "realita", "target", "TARGET");
-  drawScheme("Laporan Komitmen (+ CASA & DPK)", "Realisasi vs Komitmen", "komitmen", "komitmenVal", "KOMITMEN");
-  drawScheme("Laporan Kecukupan Dana (+ CASA & DPK)", "(Realisasi + Total Potensi) vs Target", "kecukupan", "target", "TARGET");
+  drawScheme("Laporan Realisasi (+ CASA & DPK)", "Realisasi vs Target", "realita", "target", "TARGET", false);
+  drawScheme("Laporan Komitmen (+ CASA & DPK)", "Realisasi vs Komitmen", "komitmen", "komitmenVal", "KOMITMEN", false);
+  drawScheme("Laporan Kecukupan Potensi Dana Masuk vs Target (+ CASA & DPK)", "(Realisasi + Total Potensi) vs Target", "kecukupan", "target", "TARGET", true);
+  drawScheme("Laporan Kecukupan Potensi Dana Masuk vs Komitmen (+ CASA & DPK)", "(Realisasi + Total Potensi) vs Komitmen", "kecukupanKomitmen", "komitmenVal", "KOMITMEN", true);
   const entryCols = [{label:"PIC",w:104},{label:"NASABAH",w:122},{label:"NO. REK",w:65},{label:"NOMINAL (JUTA)",w:39,align:"right"},{label:"SUMBER",w:69},{label:"TGL",w:52},{label:"STATUS",w:56}];
   PIPELINE_JENIS.forEach(jenis=>{
     const rows = filtered.filter(e=>e.jenis===jenis).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
@@ -5642,7 +5729,7 @@ async function downloadSummaryPDF(){
     ];
     const plCmpCols = [{label:"JENIS",w:105},{label:"MTD",w:135,align:"right"},{label:"YTD",w:135,align:"right"},{label:"YOY",w:135,align:"right"}];
     function mkPlMainCols(baseLabel){ return [{label:"JENIS",w:105},{label:"POTENSI",w:80,align:"right"},{label:"PIPELINE",w:80,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:baseLabel,w:75,align:"right"},{label:"GAP",w:75,align:"right"}]; }
-    function drawPipelineScheme(title, subtitle, schemeKey, baseField, baseLabel){
+    function drawPipelineScheme(title, subtitle, schemeKey, baseField, baseLabel, usesPotensi){
       sectionTitle(title);
       doc.setFont("helvetica","italic"); doc.setFontSize(8); doc.setTextColor(130,130,130);
       doc.text(`${subtitle} — semua nilai dalam juta rupiah.`, MARGIN, y); y += 12;
@@ -5653,7 +5740,7 @@ async function downloadSummaryPDF(){
         const sch = st[schemeKey];
         const base = st[baseField];
         const pct = base>0 ? (sch.gap+base)/base*100 : 0;
-        tableRow(plMainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(base), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
+        tableRow(plMainCols, [label, usesPotensi?fmtNumId(st.potensi):"0", usesPotensi?fmtNumId(st.pipelineTotal):"0", fmtNumId(st.realisasi), fmtNumId(base), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
           {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK, base>0?pdfAchievementColor(pct):PDF_BLACK], dots: base>0 ? {5: pdfAchievementColor(pct)} : null});
       });
       y += 8;
@@ -5666,9 +5753,10 @@ async function downloadSummaryPDF(){
       });
       y += 10;
     }
-    drawPipelineScheme("Laporan Realisasi", "Realisasi vs Target", "realita", "target", "TARGET");
-    drawPipelineScheme("Laporan Komitmen", "Realisasi vs Komitmen", "komitmen", "komitmenVal", "KOMITMEN");
-    drawPipelineScheme("Laporan Kecukupan Dana", "(Realisasi + Total Potensi) vs Target", "kecukupan", "target", "TARGET");
+    drawPipelineScheme("Laporan Realisasi", "Realisasi vs Target", "realita", "target", "TARGET", false);
+    drawPipelineScheme("Laporan Komitmen", "Realisasi vs Komitmen", "komitmen", "komitmenVal", "KOMITMEN", false);
+    drawPipelineScheme("Laporan Kecukupan Potensi Dana Masuk vs Target", "(Realisasi + Total Potensi) vs Target", "kecukupan", "target", "TARGET", true);
+    drawPipelineScheme("Laporan Kecukupan Potensi Dana Masuk vs Komitmen", "(Realisasi + Total Potensi) vs Komitmen", "kecukupanKomitmen", "komitmenVal", "KOMITMEN", true);
 
     const totalPipelineAll = pipelineTotalPipeline(state.pipeline);
     const totalPotensiAll = pipelineTotalPotensi(state.pipeline);
@@ -5863,14 +5951,16 @@ async function doLoginFlow(nip){
   // data bulan ini) jadi SATU request batch di awal, alih-alih ±16 request
   // terpisah — Apps Script punya jeda/overhead per-request yang cukup
   // terasa, jadi ini yang paling besar pengaruhnya ke kecepatan login.
+  // PERCEPAT LEBIH JAUH: Leads & Informasi TIDAK ikut di batch awal ini --
+  // keduanya tidak tampil di Dashboard sama sekali, jadi tidak perlu ikut
+  // ditunggu sebelum pengguna bisa melihat Dashboard. Keduanya dimuat
+  // belakangan di latar belakang (lihat loadNonEssentialDataInBackground).
   const rMonth = keyReports(state.month), lMonth = keyLayanan(state.month), pMonth = keyPenilaian(state.month), plMonth = keyPipeline(state.month), mMonth = keyMarketing(state.month);
   await preloginBatchFetch([
     KEY_CONFIG, `${KEY_CONFIG}::c0`,
     rMonth, `${rMonth}::c0`,
     lMonth, `${lMonth}::c0`,
     pMonth, `${pMonth}::c0`,
-    KEY_LEADS, `${KEY_LEADS}::c0`,
-    KEY_INFO, `${KEY_INFO}::c0`,
     plMonth, `${plMonth}::c0`,
     KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`,
     mMonth, `${mMonth}::c0`,
@@ -5881,13 +5971,14 @@ async function doLoginFlow(nip){
   // alih-alih membuat pengguna terjebak selamanya di layar login.
   try{
     await Promise.race([
-      Promise.all([loadConfig(), loadMonthData()]),
+      Promise.all([loadConfig(), loadEssentialMonthData()]),
       new Promise((resolve)=> setTimeout(resolve, 8000)),
     ]);
   }catch(err){
     console.error("Gagal memuat data awal:", err);
     if(window.__reportError) window.__reportError("Gagal memuat data awal: " + (err && (err.stack||err.message) || err));
   }
+  loadNonEssentialDataInBackground();
   // Cache prefetch cuma dipakai sekali di awal login -- kosongkan lagi
   // supaya semua permintaan SETELAH ini (simpan, ganti bulan, dll) selalu
   // mengambil data paling baru langsung dari server, bukan dari cache lama.
@@ -5962,7 +6053,11 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
       const nip = sanitizeNIP(document.getElementById("loginNIP").value);
       if(!nip){ toast("Silakan tulis NIP Anda (hanya angka)", "⚠️"); return; }
       const loaded = await loadConfig();
-      if(!loaded){ toast("Gagal memeriksa akses, coba lagi", "⚠️"); return; }
+      if(!loaded){
+        toast("Gagal memeriksa akses, coba lagi", "⚠️");
+        if(window.__reportError && window.__storageErrors.length) window.__reportError("Gagal akses data (Google Sheets/Apps Script):\n" + window.__storageErrors.join("\n"));
+        return;
+      }
       const isAdmin = CFG.adminNips.includes(nip);
       const roleLabel = isAdmin ? "Admin" : "karyawan";
       loginPendingNip = nip;

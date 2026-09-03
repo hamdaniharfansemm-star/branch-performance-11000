@@ -1321,25 +1321,38 @@ async function saveList(key, arr){
    Kalau proses ambil data terbaru GAGAL (jaringan bermasalah), seluruh proses
    simpan DIBATALKAN (bukan diam-diam memakai salinan lama di memori lalu
    menyimpannya) — supaya kegagalan jaringan sesaat tidak pernah bisa
-   menimpa/menghapus data yang sudah tersimpan di server. */
+   menimpa/menghapus data yang sudah tersimpan di server.
+   Antrian PER-KEY: kalau ada dua penyimpanan ke KEY YANG SAMA terjadi hampir
+   bersamaan (mis. klik ganda tak sengaja, atau dua tab terbuka), keduanya
+   dijalankan satu-satu (bukan bersamaan) supaya yang belakangan tidak
+   menimpa perubahan yang baru saja disimpan duluan dengan data basi. Key
+   yang berbeda tetap bisa berjalan bersamaan seperti biasa. */
+const __listSaveQueues = new Map();
 async function mutateAndSave(key, stateProp, mutatorFn){
-  let fresh;
-  try{
-    fresh = await loadList(key);
-  }catch(e){
-    window.__storageErrors.push(String(e && e.message || e));
-    return false;
+  async function doOne(){
+    let fresh;
+    try{
+      fresh = await loadList(key);
+    }catch(e){
+      window.__storageErrors.push(String(e && e.message || e));
+      return false;
+    }
+    mutatorFn(fresh);
+    const ok = await saveList(key, fresh);
+    if(ok) state[stateProp] = fresh;
+    return ok;
   }
-  mutatorFn(fresh);
-  const ok = await saveList(key, fresh);
-  if(ok) state[stateProp] = fresh;
-  return ok;
+  const prevQueue = __listSaveQueues.get(key) || Promise.resolve();
+  const myTurn = prevQueue.then(doOne, doOne);
+  __listSaveQueues.set(key, myTurn.then(()=>{}, ()=>{}));
+  return myTurn;
 }
 function keyReports(m){ return `reports:${m}`; }
 function keyLayanan(m){ return `layanan:${m}`; }
 function keyPenilaian(m){ return `penilaian:${m}`; }
-const KEY_LEADS = "leads:master"; // leads bersifat global (tidak terikat bulan)
-const KEY_MARKETING = "marketing:reports"; // laporan marketing, global (tidak terikat bulan)
+const KEY_LEADS = "leads:master"; // leads bersifat global (tidak terikat bulan) -- ini SENGAJA: daftar leads untuk ditindaklanjuti tetap perlu terlihat lintas bulan sampai selesai di-follow-up
+function keyMarketing(month){ return `marketing:${month}`; } // laporan kunjungan marketing, terkunci per bulan (sama seperti Pipeline Dana & Lapor Akuisisi)
+const KEY_MARKETING_LEGACY = "marketing:reports"; // format lama (global) -- dipertahankan hanya untuk migrasi otomatis
 const KEY_INFO = "info:posts"; // pengumuman/info karyawan, global (tidak terikat bulan)
 const KEY_PIPELINE_LEGACY = "pipeline:master"; // format lama (global, tidak terikat bulan) -- dipakai sebagai fallback migrasi saja
 function keyPipeline(month){ return `pipeline:${month}`; } // format baru: setiap bulan datanya terkunci terpisah, seperti Laporan Akuisisi
@@ -1385,6 +1398,86 @@ async function safeLoadPipelineForMonth(month){
     return null;
   }
 }
+/* Sama polanya seperti Pipeline Dana: laporan Marketing dulunya SATU daftar
+   global (tidak terkunci per bulan) — sekarang terkunci per bulan juga,
+   dengan migrasi otomatis dari format lama (dicocokkan lewat createdAt,
+   karena entri Marketing tidak punya field tanggal terpisah). */
+async function loadMarketingForMonth(month){
+  const newKey = keyMarketing(month);
+  const newList = await loadList(newKey);
+  let legacyList = [];
+  try{ legacyList = await loadList(KEY_MARKETING_LEGACY); }catch(e){ legacyList = []; }
+  const newIds = new Set(newList.map(e=>e.id));
+  const legacyForThisMonth = legacyList.filter(e => {
+    const em = e.createdAt ? new Date(e.createdAt).toISOString().slice(0,7) : "";
+    return em===month && !newIds.has(e.id);
+  });
+  if(!legacyForThisMonth.length) return newList;
+  const merged = [...newList, ...legacyForThisMonth];
+  try{ await saveList(newKey, merged); }catch(e){ /* gagal simpan migrasi -- tetap tampilkan gabungannya untuk sesi ini */ }
+  return merged;
+}
+async function safeLoadMarketingForMonth(month){
+  try{
+    return await loadMarketingForMonth(month);
+  }catch(e){
+    window.__storageErrors.push(String(e && e.message || e));
+    return null;
+  }
+}
+/* Sama seperti mutateAndSave, TAPI khusus untuk entri Pipeline Dana — pakai
+   loadPipelineForMonth() (yang sadar migrasi dari format lama) untuk
+   mengambil data TERBARU, bukan loadList() polos. Ini PENTING: kalau dipakai
+   loadList() polos, dan migrasi dari format lama (pipeline:master) untuk
+   bulan ini KEBETULAN belum sempat benar-benar tersimpan (mis. sempat gagal
+   sekali), maka fetch "terbaru"-nya akan tampak KOSONG padahal sebenarnya
+   ada data lama yang belum sempat "naik kelas" — lalu entri baru yang
+   ditambahkan akan MENIMPA (menghilangkan) semua entri lama itu tanpa
+   jejak. Dengan fungsi ini, entri lama selalu ikut diperhitungkan. Juga
+   diberi antrian per-bulan supaya dua penyimpanan Pipeline yang hampir
+   bersamaan untuk bulan yang sama tidak saling menimpa. */
+const __pipelineSaveQueues = new Map();
+async function mutatePipelineAndSave(mutatorFn){
+  const month = state.month;
+  async function doOne(){
+    let fresh;
+    try{
+      fresh = await loadPipelineForMonth(month);
+    }catch(e){
+      window.__storageErrors.push(String(e && e.message || e));
+      return false;
+    }
+    mutatorFn(fresh);
+    const ok = await saveList(keyPipeline(month), fresh);
+    if(ok && state.month === month) state.pipeline = fresh;
+    return ok;
+  }
+  const prevQueue = __pipelineSaveQueues.get(month) || Promise.resolve();
+  const myTurn = prevQueue.then(doOne, doOne);
+  __pipelineSaveQueues.set(month, myTurn.then(()=>{}, ()=>{}));
+  return myTurn;
+}
+const __marketingSaveQueues = new Map();
+async function mutateMarketingAndSave(mutatorFn){
+  const month = state.month;
+  async function doOne(){
+    let fresh;
+    try{
+      fresh = await loadMarketingForMonth(month);
+    }catch(e){
+      window.__storageErrors.push(String(e && e.message || e));
+      return false;
+    }
+    mutatorFn(fresh);
+    const ok = await saveList(keyMarketing(month), fresh);
+    if(ok && state.month === month) state.marketing = fresh;
+    return ok;
+  }
+  const prevQueue = __marketingSaveQueues.get(month) || Promise.resolve();
+  const myTurn = prevQueue.then(doOne, doOne);
+  __marketingSaveQueues.set(month, myTurn.then(()=>{}, ()=>{}));
+  return myTurn;
+}
 async function loadMonthData(){
   const [r,l,p,ld,inf,pl,mk] = await Promise.all([
     safeLoadList(keyReports(state.month)),
@@ -1393,7 +1486,7 @@ async function loadMonthData(){
     safeLoadList(KEY_LEADS),
     safeLoadList(KEY_INFO),
     safeLoadPipelineForMonth(state.month),
-    safeLoadList(KEY_MARKETING),
+    safeLoadMarketingForMonth(state.month),
   ]);
   if(r !== null) state.reports = r;
   if(l !== null) state.layanan = l;
@@ -2802,7 +2895,7 @@ function renderMarketingSubTab(container){
     if((hasil==="Deal" || hasil==="Reject") && !ket){ toast("Keterangan wajib diisi untuk hasil ini", "⚠️"); return; }
     const entry = { id: uid(), pic, kol, usaha, hasil, keterangan: ket, createdAt: Date.now(), submittedByNip: state.nip };
     if(hasil==="FU"){ entry.tanggalFU = document.getElementById("mkt_tglfu").value; }
-    const ok = await mutateAndSave(KEY_MARKETING, "marketing", (fresh)=>{ fresh.push(entry); });
+    const ok = await mutateMarketingAndSave( (fresh)=>{ fresh.push(entry); });
     if(!ok){ toast("Gagal menyimpan, coba lagi", "⚠️"); return; }
     toast("Laporan marketing terkirim", "🎉");
     playSound("bell");
@@ -2870,7 +2963,7 @@ function drawMktList(){
     box.querySelectorAll("[data-mkt-del]").forEach(b=>b.onclick=async()=>{
       const id = b.dataset.mktDel;
       if(!confirm("Hapus laporan marketing ini?")) return;
-      await mutateAndSave(KEY_MARKETING, "marketing", (fresh)=>{
+      await mutateMarketingAndSave( (fresh)=>{
         const idx = fresh.findIndex(x=>x.id===id);
         if(idx>=0) fresh.splice(idx,1);
       });
@@ -2930,7 +3023,7 @@ function openEditMarketing(id){
       keterangan: document.getElementById("em_ket").value.trim(),
     };
     if(edits.hasil==="FU") edits.tanggalFU = document.getElementById("em_tglfu").value;
-    await mutateAndSave(KEY_MARKETING, "marketing", (fresh)=>{
+    await mutateMarketingAndSave( (fresh)=>{
       const target = fresh.find(x=>x.id===m.id);
       if(target){ Object.assign(target, edits); if(edits.hasil!=="FU") delete target.tanggalFU; }
     });
@@ -3256,7 +3349,7 @@ function renderPipeline(){
       status: document.getElementById("pl_status").value,
       createdAt: Date.now(),
     };
-    const ok = await mutateAndSave(keyPipeline(state.month), "pipeline", (fresh)=>{ fresh.push(entry); });
+    const ok = await mutatePipelineAndSave( (fresh)=>{ fresh.push(entry); });
     if(!ok){ toast("Gagal menyimpan, coba lagi", "⚠️"); return; }
     toast("Laporan pipeline terkirim", "🎉");
     playSound("bell");
@@ -3567,7 +3660,7 @@ function drawPipelineList(filtered){
     box.querySelectorAll("[data-pl-del]").forEach(b=>b.onclick=async()=>{
       const id = b.dataset.plDel;
       if(!confirm("Hapus entri pipeline ini?")) return;
-      await mutateAndSave(keyPipeline(state.month), "pipeline", (fresh)=>{
+      await mutatePipelineAndSave( (fresh)=>{
         const idx = fresh.findIndex(x=>x.id===id);
         if(idx>=0) fresh.splice(idx,1);
       });
@@ -3628,7 +3721,7 @@ function openEditPipeline(id){
       tanggal: document.getElementById("ep_tanggal").value,
       status: document.getElementById("ep_status").value,
     };
-    await mutateAndSave(keyPipeline(state.month), "pipeline", (fresh)=>{
+    await mutatePipelineAndSave( (fresh)=>{
       const target = fresh.find(x=>x.id===entry.id);
       if(target) Object.assign(target, edits);
     });
@@ -3685,7 +3778,7 @@ function openEditPipelineKaryawan(id){
       tanggal: document.getElementById("ek_tanggal").value,
       status: document.getElementById("ek_status").value,
     };
-    await mutateAndSave(keyPipeline(state.month), "pipeline", (fresh)=>{
+    await mutatePipelineAndSave( (fresh)=>{
       const target = fresh.find(x=>x.id===entry.id);
       if(target) Object.assign(target, edits);
     });
@@ -4299,12 +4392,34 @@ function drawUserAccountList(){
    proses simpan DIBATALKAN sepenuhnya (bukan lanjut menyimpan data lama/
    default) — supaya kegagalan jaringan sesaat tidak pernah bisa menghapus
    data asli yang sudah tersimpan di server. */
+/* Antrian (queue) supaya SEMUA pemanggilan mutateConfigAndSave berjalan
+   satu-satu, tidak pernah tumpang tindih. Ini penting: kalau dua perubahan
+   config terjadi HAMPIR BERSAMAAN (mis. pencatatan aktivitas login yang
+   berjalan di latar belakang, BERSAMAAN dengan Admin menyimpan Target/
+   Realisasi Pipeline Dana), tanpa antrian ini keduanya bisa "fetch data
+   lama" di waktu yang hampir sama, lalu yang PALING AKHIR selesai simpan
+   akan MENIMPA yang lain dengan data lama — perubahan yang lain hilang
+   tanpa jejak/tanpa pesan error apa pun. Inilah kemungkinan besar penyebab
+   Target/Realisasi/Komitmen bulan lalu terlihat "hilang" padahal sudah
+   pernah disimpan. Dengan antrian ini, setiap pemanggilan menunggu giliran
+   sebelumnya BENAR-BENAR selesai (ambil data terbaru -> ubah -> simpan)
+   sebelum memulai proses ambil datanya sendiri — sehingga fetch-nya selalu
+   melihat hasil simpan sebelumnya, bukan data basi. */
+let __configSaveQueue = Promise.resolve();
 async function mutateConfigAndSave(mutatorFn){
-  const loaded = await loadConfig();
-  if(!loaded) return false; // gagal ambil data terbaru -- batalkan simpan sepenuhnya
-  mutatorFn(CFG);
-  const ok = await saveConfig();
-  return ok;
+  async function doOne(){
+    const loaded = await loadConfig();
+    if(!loaded) return false; // gagal ambil data terbaru -- batalkan simpan sepenuhnya
+    mutatorFn(CFG);
+    const ok = await saveConfig();
+    return ok;
+  }
+  const myTurn = __configSaveQueue.then(doOne, doOne);
+  // Antrian sendiri harus SELALU lanjut ke giliran berikutnya walau ada yang
+  // gagal/exception -- jangan sampai satu kegagalan menyumbat semua
+  // pemanggilan mutateConfigAndSave berikutnya selama-lamanya.
+  __configSaveQueue = myTurn.then(()=>{}, ()=>{});
+  return myTurn;
 }
 
 /* ---- Kelola Karyawan ---- */
@@ -4804,7 +4919,7 @@ async function onPeriodChange(){
     // sama seperti optimasi login — daripada sampai ±14 permintaan terpisah
     // (7 jenis data x sampai 2 masing-masing), sekarang cukup 1 permintaan
     // gabungan sebelum loadMonthData() jalan seperti biasa.
-    const rMonth = keyReports(state.month), lMonth = keyLayanan(state.month), pMonth = keyPenilaian(state.month), plMonth = keyPipeline(state.month);
+    const rMonth = keyReports(state.month), lMonth = keyLayanan(state.month), pMonth = keyPenilaian(state.month), plMonth = keyPipeline(state.month), mMonth = keyMarketing(state.month);
     await preloginBatchFetch([
       rMonth, `${rMonth}::c0`,
       lMonth, `${lMonth}::c0`,
@@ -4813,7 +4928,8 @@ async function onPeriodChange(){
       KEY_INFO, `${KEY_INFO}::c0`,
       plMonth, `${plMonth}::c0`,
       KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`,
-      KEY_MARKETING, `${KEY_MARKETING}::c0`,
+      mMonth, `${mMonth}::c0`,
+      KEY_MARKETING_LEGACY, `${KEY_MARKETING_LEGACY}::c0`,
     ]);
     await loadMonthData();
     toast(`Menampilkan data ${monthLabel()}`, "🗓️");
@@ -5722,7 +5838,7 @@ async function doLoginFlow(nip){
   // data bulan ini) jadi SATU request batch di awal, alih-alih ±16 request
   // terpisah — Apps Script punya jeda/overhead per-request yang cukup
   // terasa, jadi ini yang paling besar pengaruhnya ke kecepatan login.
-  const rMonth = keyReports(state.month), lMonth = keyLayanan(state.month), pMonth = keyPenilaian(state.month), plMonth = keyPipeline(state.month);
+  const rMonth = keyReports(state.month), lMonth = keyLayanan(state.month), pMonth = keyPenilaian(state.month), plMonth = keyPipeline(state.month), mMonth = keyMarketing(state.month);
   await preloginBatchFetch([
     KEY_CONFIG, `${KEY_CONFIG}::c0`,
     rMonth, `${rMonth}::c0`,
@@ -5732,7 +5848,8 @@ async function doLoginFlow(nip){
     KEY_INFO, `${KEY_INFO}::c0`,
     plMonth, `${plMonth}::c0`,
     KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`,
-    KEY_MARKETING, `${KEY_MARKETING}::c0`,
+    mMonth, `${mMonth}::c0`,
+    KEY_MARKETING_LEGACY, `${KEY_MARKETING_LEGACY}::c0`,
   ]);
   // Jaring pengaman: kalau memuat data macet (mis. koneksi lambat / backend
   // Apps Script tidak merespons), tetap masuk ke dashboard setelah 8 detik

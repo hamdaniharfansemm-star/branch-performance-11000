@@ -1130,10 +1130,14 @@ async function recordLoginActivity(nip){
 async function sendResetEmail(to, subject, body){
   if(!APPS_SCRIPT_URL) return false; // mode window.storage (tanpa Apps Script) tidak bisa kirim email sungguhan
   try{
+    const controller = new AbortController();
+    const timer = setTimeout(()=> controller.abort(), 15000);
     const res = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       body: JSON.stringify({ action:"sendEmail", to, subject, body }),
+      signal: controller.signal,
     });
+    clearTimeout(timer);
     const data = await res.json();
     return !!(data && data.ok);
   }catch(e){ return false; }
@@ -4585,7 +4589,10 @@ async function checkStoredData(){
   const box = document.getElementById("diagResultBox");
   box.innerHTML = `<p class="hint">Memeriksa server...</p>`;
   try{
-    const res = await fetch(`${APPS_SCRIPT_URL}?listkeys=1`);
+    const controller = new AbortController();
+    const timer = setTimeout(()=> controller.abort(), 15000);
+    const res = await fetch(`${APPS_SCRIPT_URL}?listkeys=1`, {signal: controller.signal});
+    clearTimeout(timer);
     const data = await res.json();
     const keys = data.keys || [];
     if(!keys.length){
@@ -5824,6 +5831,24 @@ let loginBusy = false;
 function sanitizeNIP(raw){
   return String(raw||"").replace(/[^0-9]/g, "");
 }
+/* JARING PENGAMAN TERAKHIR: apa pun yang terjadi di dalam doLoginFlow, tombol
+   login TIDAK PERNAH boleh macet selamanya di "Memuat...". Fungsi ini
+   membungkus doLoginFlow dengan batas waktu MUTLAK (20 detik) — kalau
+   sampai batas itu doLoginFlow belum juga selesai (karena sebab apa pun,
+   termasuk kemungkinan yang belum ketahuan), proses dianggap gagal dan
+   layar login dikembalikan ke kondisi bisa dipakai lagi, dengan pesan
+   error yang jelas — BUKAN dibiarkan diam membisu tanpa batas waktu. */
+async function doLoginFlowWithFailsafe(nip){
+  let timeoutId;
+  const failsafe = new Promise((_, reject)=>{
+    timeoutId = setTimeout(()=> reject(new Error("Proses login melebihi 20 detik — server tidak merespons. Coba lagi.")), 20000);
+  });
+  try{
+    await Promise.race([doLoginFlow(nip), failsafe]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 async function doLoginFlow(nip){
   nip = sanitizeNIP(nip);
   state.nip = nip;
@@ -5982,7 +6007,7 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
       // bahkan MULAI — inilah penyebab jeda tambahan yang terasa setelah
       // memasukkan password. Sekarang berjalan di latar belakang saja.
       recordLoginActivity(loginPendingNip);
-      await doLoginFlow(loginPendingNip);
+      await doLoginFlowWithFailsafe(loginPendingNip);
       resetLoginStage();
       return;
     }
@@ -6000,7 +6025,7 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
         cfg.userAuth[loginPendingNip] = { email, passwordHash: hash, role: roleAtSetup, firstLoginAt: Date.now(), lastLoginAt: Date.now(), loginCount: 1 };
       });
       if(!ok){ toast("Gagal menyimpan password, coba lagi", "⚠️"); return; }
-      await doLoginFlow(loginPendingNip);
+      await doLoginFlowWithFailsafe(loginPendingNip);
       resetLoginStage();
       return;
     }
@@ -6098,7 +6123,7 @@ function doLogout(){
       document.getElementById("loginFormWrap").style.display = "none";
       document.getElementById("autoLoginOverlay").style.display = "block";
       document.getElementById("loginNIP").value = saved.nip;
-      doLoginFlow(saved.nip);
+      doLoginFlowWithFailsafe(saved.nip);
     }
   }catch(e){}
 })();

@@ -3132,6 +3132,7 @@ function renderPipeline(){
           <div>
             <h3 class="sub" style="font-size:13px;margin-bottom:10px">${j}</h3>
             <div class="field"><label>Target (juta)</label><input type="number" min="0" id="pt_${j}" value="${mCfg.targets[j]||0}"></div>
+            <div class="field"><label>Komitmen (juta)</label><input type="number" min="0" id="pk_${j}" value="${mCfg.komitmen[j]||0}"></div>
             <div class="field"><label>Realisasi (juta)</label><input type="number" min="0" id="pr_${j}" value="${mCfg.realisasi[j]||0}"></div>
             <div class="field"><label>Bulan Lalu (juta)</label><input type="number" min="0" id="pmtd_${j}" value="${mCfg.mtdBase[j]||0}"></div>
             <div class="field"><label>Akhir Tahun Lalu (juta)</label><input type="number" min="0" id="pytd_${j}" value="${mCfg.ytdBase[j]||0}"></div>
@@ -3233,9 +3234,10 @@ function renderPipeline(){
 
   if(isAdmin){
     document.getElementById("pipelineTargetSaveBtn").onclick = async ()=>{
-      const newTargets = {}, newRealisasi = {}, newMTD = {}, newYTD = {}, newYOY = {};
+      const newTargets = {}, newKomitmen = {}, newRealisasi = {}, newMTD = {}, newYTD = {}, newYOY = {};
       PIPELINE_JENIS.forEach(j=>{
         newTargets[j] = Number(document.getElementById(`pt_${j}`).value||0);
+        newKomitmen[j] = Number(document.getElementById(`pk_${j}`).value||0);
         newRealisasi[j] = Number(document.getElementById(`pr_${j}`).value||0);
         newMTD[j] = Number(document.getElementById(`pmtd_${j}`).value||0);
         newYTD[j] = Number(document.getElementById(`pytd_${j}`).value||0);
@@ -3245,12 +3247,12 @@ function renderPipeline(){
       const ok = await mutateConfigAndSave((cfg)=>{
         if(!cfg.pipelineMonthly) cfg.pipelineMonthly = {};
         cfg.pipelineMonthly[savingMonth] = {
-          targets: newTargets, realisasi: newRealisasi,
+          targets: newTargets, komitmen: newKomitmen, realisasi: newRealisasi,
           mtdBase: newMTD, ytdBase: newYTD, yoyBase: newYOY,
         };
       });
       if(!ok){ toast("Gagal menyimpan, coba lagi", "⚠️"); return; }
-      toast(`Target, Realisasi & Pembanding untuk ${monthLabelOf(savingMonth)} berhasil disimpan`, "✅");
+      toast(`Target, Komitmen, Realisasi & Pembanding untuk ${monthLabelOf(savingMonth)} berhasil disimpan`, "✅");
       playSound("bell");
       if(state.tab !== "pipeline") return;
       refreshPipelineView();
@@ -3326,6 +3328,7 @@ function drawPipelineKpiCards(filtered){
 function defaultPipelineMonthCfg(){
   return {
     targets: {"Tabungan":0,"Giro":0,"Deposito":0},
+    komitmen: {"Tabungan":0,"Giro":0,"Deposito":0}, // field BARU: Komitmen (dibandingkan terpisah dari Target)
     realisasi: {"Tabungan":0,"Giro":0,"Deposito":0},
     mtdBase: {"Tabungan":0,"Giro":0,"Deposito":0},
     ytdBase: {"Tabungan":0,"Giro":0,"Deposito":0},
@@ -3341,12 +3344,19 @@ function defaultPipelineMonthCfg(){
    bulan yang pertama kali dibuka setelah pembaruan ini (murni untuk baca —
    baru benar-benar tersimpan ke format baru saat Admin klik "Simpan"). */
 function getPipelineMonthCfg(month){
-  if(CFG.pipelineMonthly && CFG.pipelineMonthly[month]) return CFG.pipelineMonthly[month];
+  if(CFG.pipelineMonthly && CFG.pipelineMonthly[month]){
+    // Jaga-jaga: kalau bulan ini sudah tersimpan TAPI dari sebelum field
+    // "komitmen" ada, lengkapi dengan nilai kosong supaya tidak error.
+    const m = CFG.pipelineMonthly[month];
+    if(!m.komitmen) m.komitmen = {"Tabungan":0,"Giro":0,"Deposito":0};
+    return m;
+  }
   const hasAnyMonthly = CFG.pipelineMonthly && Object.keys(CFG.pipelineMonthly).length > 0;
   const legacyHasData = CFG.pipelineTargets && Object.values(CFG.pipelineTargets).some(v=>v>0);
   if(!hasAnyMonthly && legacyHasData){
     return {
       targets: {...CFG.pipelineTargets},
+      komitmen: {"Tabungan":0,"Giro":0,"Deposito":0},
       realisasi: {...CFG.pipelineRealisasi},
       mtdBase: {...CFG.pipelineMTDBase},
       ytdBase: {...CFG.pipelineYTDBase},
@@ -3361,13 +3371,14 @@ function pipelineGroupStats(entries, jenisList){
   const pipelineTotal = pipelineTotalPipeline(scoped);
   const mCfg = getPipelineMonthCfg(state.month);
   const target = jenisList.reduce((s,j)=>s+(mCfg.targets[j]||0),0);
+  const komitmenVal = jenisList.reduce((s,j)=>s+(mCfg.komitmen[j]||0),0);
   const realisasi = jenisList.reduce((s,j)=>s+(mCfg.realisasi[j]||0),0);
   const mtdBase = jenisList.reduce((s,j)=>s+(mCfg.mtdBase[j]||0),0);
   const ytdBase = jenisList.reduce((s,j)=>s+(mCfg.ytdBase[j]||0),0);
   const yoyBase = jenisList.reduce((s,j)=>s+(mCfg.yoyBase[j]||0),0);
   const combined = realisasi + potensi; // Realisasi + Total Potensi
 
-  // SKEMA 1 — LAPORAN REALITA: murni dari Realisasi saja (tanpa potensi).
+  // SKEMA A — LAPORAN REALISASI: Realisasi murni (tanpa potensi) dibandingkan TARGET.
   const realita = {
     gap: realisasi - target,
     mtd: realisasi - mtdBase,
@@ -3375,8 +3386,20 @@ function pipelineGroupStats(entries, jenisList){
     yoy: realisasi - yoyBase,
     pct: target>0 ? realisasi/target*100 : 0,
   };
-  // SKEMA 2 — LAPORAN ASUMSI: dari Realisasi + Total Potensi (potensi ikut dihitung).
+  // SKEMA B — LAPORAN KOMITMEN (baru): Realisasi murni dibandingkan KOMITMEN
+  // (bukan Target). MTD/YTD/YOY memakai basis historis yang sama (murni
+  // soal tren Realisasi dari waktu ke waktu, tidak tergantung dibandingkan
+  // dengan apa) — hanya Gap & % Pencapaian yang beda karena pembandingnya beda.
   const komitmen = {
+    gap: realisasi - komitmenVal,
+    mtd: realisasi - mtdBase,
+    ytd: realisasi - ytdBase,
+    yoy: realisasi - yoyBase,
+    pct: komitmenVal>0 ? realisasi/komitmenVal*100 : 0,
+  };
+  // SKEMA C — LAPORAN KECUKUPAN DANA (dulu bernama "Laporan Komitmen"):
+  // Realisasi + Total Potensi (potensi ikut dihitung) dibandingkan TARGET.
+  const kecukupan = {
     gap: combined - target,
     mtd: combined - mtdBase,
     ytd: combined - ytdBase,
@@ -3384,11 +3407,12 @@ function pipelineGroupStats(entries, jenisList){
     pct: target>0 ? combined/target*100 : 0,
   };
 
-  return {potensi, pipelineTotal, target, realisasi, combined, mtdBase, ytdBase, yoyBase, realita, komitmen,
-    // alias lama (dipakai kode lain seperti Excel ringkasan lama) -> mengikuti skema Komitmen
-    gap: komitmen.gap, mtd: komitmen.mtd, ytd: komitmen.ytd, yoy: komitmen.yoy};
+  return {potensi, pipelineTotal, target, komitmenVal, realisasi, combined, mtdBase, ytdBase, yoyBase, realita, komitmen, kecukupan,
+    // alias lama (dipakai kode lain seperti label ringkasan) -> mengikuti skema Kecukupan Dana
+    gap: kecukupan.gap, mtd: kecukupan.mtd, ytd: kecukupan.ytd, yoy: kecukupan.yoy};
 }
-function pipelineSchemeBlockHTML(title, subtitle, icon, sch, target, badgeCls){
+function pipelineSchemeBlockHTML(title, subtitle, icon, sch, target, badgeCls, baseLabel){
+  baseLabel = baseLabel || "target";
   return `
     <div style="margin-top:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06)">
       <div style="font-size:10.5px;font-weight:800;color:${badgeCls};margin-bottom:2px">${icon} ${title}</div>
@@ -3410,12 +3434,12 @@ function pipelineSchemeBlockHTML(title, subtitle, icon, sch, target, badgeCls){
       ${target>0 ? `
       <div style="text-align:center">
         <span class="badge ${sch.gap>=0?'ok':'danger'}" style="font-size:9.5px">Gap: ${sch.gap>=0?'+':''}${fmtJuta(sch.gap)}</span>
-        ${(()=>{ const d = pipelineAchievementDot(sch.pct); return `<div style="margin-top:6px;font-size:11.5px;font-weight:800;color:${d.color}">${d.dot} ${sch.pct.toFixed(1)}% dari target</div>`; })()}
-      </div>` : `<div class="hint" style="font-size:10px;text-align:center">Target belum diatur</div>`}
+        ${(()=>{ const d = pipelineAchievementDot(sch.pct); return `<div style="margin-top:6px;font-size:11.5px;font-weight:800;color:${d.color}">${d.dot} ${sch.pct.toFixed(1)}% dari ${baseLabel}</div>`; })()}
+      </div>` : `<div class="hint" style="font-size:10px;text-align:center">${baseLabel.charAt(0).toUpperCase()+baseLabel.slice(1)} belum diatur</div>`}
     </div>`;
 }
 function pipelineCardHTML(label, icon, stats, isAdmin, isAggregate){
-  const {potensi, pipelineTotal, target, realisasi, combined, realita, komitmen} = stats;
+  const {potensi, pipelineTotal, target, komitmenVal, realisasi, combined, realita, komitmen, kecukupan} = stats;
   return `
     <div class="card glow${isAggregate?' pipeline-agg-card':''}">
       <div class="orb o-gold"></div>
@@ -3436,13 +3460,18 @@ function pipelineCardHTML(label, icon, stats, isAdmin, isAggregate){
         <span style="font-size:11.5px;color:var(--ink-200);font-weight:700">Realisasi + Potensi</span>
         <b style="color:#fff">${fmtJuta(combined)}</b>
       </div>
-      ${isAdmin || target>0 ? `
+      ${isAdmin || target>0 || komitmenVal>0 ? `
       <div style="display:flex;justify-content:space-between;margin-bottom:2px">
         <span style="font-size:11.5px;color:var(--ink-400)">Target</span>
         <b>${fmtJuta(target)}</b>
       </div>
-      ${pipelineSchemeBlockHTML("Laporan Realisasi", "Dari Realisasi (tanpa potensi)", "📊", realita, target, "var(--ink-200)")}
-      ${pipelineSchemeBlockHTML("Laporan Komitmen", "Dari Realisasi + Total Potensi", "🔮", komitmen, target, "var(--gold-300)")}
+      <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+        <span style="font-size:11.5px;color:var(--ink-400)">Komitmen</span>
+        <b>${fmtJuta(komitmenVal)}</b>
+      </div>
+      ${pipelineSchemeBlockHTML("Laporan Realisasi", "Realisasi vs Target", "📊", realita, target, "var(--ink-200)", "target")}
+      ${pipelineSchemeBlockHTML("Laporan Komitmen", "Realisasi vs Komitmen", "🤝", komitmen, komitmenVal, "var(--blue-400)", "komitmen")}
+      ${pipelineSchemeBlockHTML("Laporan Kecukupan Dana", "(Realisasi + Total Potensi) vs Target", "🔮", kecukupan, target, "var(--gold-300)", "target")}
       ` : `<div class="hint" style="font-size:11px">Target belum diatur Admin</div>`}
     </div>`;
 }
@@ -5010,6 +5039,33 @@ function pdfLeaderboardDetail(){
     const col = pdfAchievementColor(s.overall*100);
     p.tableRow(cols, [`${i+1}`, s.name, s.team, pctStr(s.overall), statusFor(s.overall).label], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col,col], dots:{3:col}});
   });
+  p.setY(p.getY()+10);
+
+  p.sectionTitle(`Detail Akuisisi per Produk — per Karyawan (${scope==="all"?"Semua Tim":scope})`);
+  p.paragraph("Hanya menampilkan produk yang punya target atau sudah ada laporan.", {size:8, color:[130,130,130]});
+  p.setY(p.getY()+4);
+  const detCols = [{label:"NAMA",w:130},{label:"PRODUK",w:95},{label:"UNIT",w:75,align:"right"},{label:"TARGET",w:70,align:"right"},{label:"CAPAIAN",w:70,align:"right"}];
+  p.tableHeader(detCols);
+  let anyDetailRow = false;
+  list.forEach((s)=>{
+    const emp = CFG.employees.find(e=>e.name===s.name);
+    if(!emp) return;
+    const real = realisasiFor(s.name);
+    let firstRowForEmp = true;
+    CFG.products.forEach((prod,pi)=>{
+      const unit = real[prod]||0;
+      const target = emp.targets[prod]||0;
+      if(unit===0 && target===0) return; // lewati produk yang benar-benar tidak relevan buat karyawan ini
+      anyDetailRow = true;
+      const pct = target>0 ? unit/target*100 : 0;
+      const col = target>0 ? pdfAchievementColor(pct) : PDF_BLACK;
+      p.tableRow(detCols, [firstRowForEmp?s.name:"", prod, unit, target, target>0?pct.toFixed(0)+"%":"—"],
+        {zebra: (pi%2===0), colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots: target>0 ? {4:col} : null});
+      firstRowForEmp = false;
+    });
+  });
+  if(!anyDetailRow){ p.paragraph("Belum ada target atau laporan produk untuk karyawan pada cakupan ini.", {size:9, color:[130,130,130]}); }
+
   p.finish(`Detail_Leaderboard_${state.month}.pdf`);
   toast("PDF detail Leaderboard berhasil diunduh", "📄");
 }
@@ -5216,18 +5272,20 @@ function pdfPipelineDetail(){
     ["Tabungan", ["Tabungan"]], ["Giro", ["Giro"]], ["Deposito", ["Deposito"]],
     ["CASA", ["Tabungan","Giro"]], ["DPK", ["Tabungan","Giro","Deposito"]],
   ];
-  const mainCols = [{label:"JENIS",w:105},{label:"POTENSI",w:80,align:"right"},{label:"PIPELINE",w:80,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:"TARGET",w:75,align:"right"},{label:"GAP",w:75,align:"right"}];
   const cmpCols = [{label:"JENIS",w:105},{label:"MTD",w:135,align:"right"},{label:"YTD",w:135,align:"right"},{label:"YOY",w:135,align:"right"}];
-  function drawScheme(title, schemeKey){
+  function mkMainCols(baseLabel){ return [{label:"JENIS",w:105},{label:"POTENSI",w:80,align:"right"},{label:"PIPELINE",w:80,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:baseLabel,w:75,align:"right"},{label:"GAP",w:75,align:"right"}]; }
+  function drawScheme(title, subtitle, schemeKey, baseField, baseLabel){
     p.sectionTitle(title);
-    p.paragraph("Semua nilai dalam juta rupiah.", {size:8, color:[130,130,130]});
+    p.paragraph(`${subtitle} — semua nilai dalam juta rupiah.`, {size:8, color:[130,130,130]});
+    const mainCols = mkMainCols(baseLabel);
     p.tableHeader(mainCols);
     groups.forEach(([label, jenisList], i)=>{
       const st = pipelineGroupStats(filtered, jenisList);
       const sch = st[schemeKey];
-      const pct = st.target>0 ? (sch.gap+st.target)/st.target*100 : 0;
-      p.tableRow(mainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(st.target), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
-        {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK, st.target>0?pdfAchievementColor(pct):PDF_BLACK], dots: st.target>0 ? {5: pdfAchievementColor(pct)} : null});
+      const base = st[baseField];
+      const pct = base>0 ? (sch.gap+base)/base*100 : 0;
+      p.tableRow(mainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(base), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
+        {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK, base>0?pdfAchievementColor(pct):PDF_BLACK], dots: base>0 ? {5: pdfAchievementColor(pct)} : null});
     });
     p.setY(p.getY()+8);
     p.tableHeader(cmpCols);
@@ -5239,8 +5297,9 @@ function pdfPipelineDetail(){
     });
     p.setY(p.getY()+10);
   }
-  drawScheme("Laporan Realisasi — dari Realisasi (+ CASA & DPK)", "realita");
-  drawScheme("Laporan Komitmen — dari Realisasi + Total Potensi (+ CASA & DPK)", "komitmen");
+  drawScheme("Laporan Realisasi (+ CASA & DPK)", "Realisasi vs Target", "realita", "target", "TARGET");
+  drawScheme("Laporan Komitmen (+ CASA & DPK)", "Realisasi vs Komitmen", "komitmen", "komitmenVal", "KOMITMEN");
+  drawScheme("Laporan Kecukupan Dana (+ CASA & DPK)", "(Realisasi + Total Potensi) vs Target", "kecukupan", "target", "TARGET");
   const entryCols = [{label:"PIC",w:104},{label:"NASABAH",w:122},{label:"NO. REK",w:65},{label:"NOMINAL (JUTA)",w:39,align:"right"},{label:"SUMBER",w:69},{label:"TGL",w:52},{label:"STATUS",w:56}];
   PIPELINE_JENIS.forEach(jenis=>{
     const rows = filtered.filter(e=>e.jenis===jenis).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
@@ -5401,19 +5460,21 @@ async function downloadSummaryPDF(){
       ["Tabungan", ["Tabungan"]], ["Giro", ["Giro"]], ["Deposito", ["Deposito"]],
       ["CASA", ["Tabungan","Giro"]], ["DPK", ["Tabungan","Giro","Deposito"]],
     ];
-    const plMainCols = [{label:"JENIS",w:105},{label:"POTENSI",w:80,align:"right"},{label:"PIPELINE",w:80,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:"TARGET",w:75,align:"right"},{label:"GAP",w:75,align:"right"}];
     const plCmpCols = [{label:"JENIS",w:105},{label:"MTD",w:135,align:"right"},{label:"YTD",w:135,align:"right"},{label:"YOY",w:135,align:"right"}];
-    function drawPipelineScheme(title, schemeKey){
+    function mkPlMainCols(baseLabel){ return [{label:"JENIS",w:105},{label:"POTENSI",w:80,align:"right"},{label:"PIPELINE",w:80,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:baseLabel,w:75,align:"right"},{label:"GAP",w:75,align:"right"}]; }
+    function drawPipelineScheme(title, subtitle, schemeKey, baseField, baseLabel){
       sectionTitle(title);
       doc.setFont("helvetica","italic"); doc.setFontSize(8); doc.setTextColor(130,130,130);
-      doc.text("Semua nilai dalam juta rupiah.", MARGIN, y); y += 12;
+      doc.text(`${subtitle} — semua nilai dalam juta rupiah.`, MARGIN, y); y += 12;
+      const plMainCols = mkPlMainCols(baseLabel);
       tableHeader(plMainCols);
       plGroups.forEach(([label, jenisList], i)=>{
         const st = pipelineGroupStats(state.pipeline, jenisList);
         const sch = st[schemeKey];
-        const pct = st.target>0 ? (sch.gap+st.target)/st.target*100 : 0;
-        tableRow(plMainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(st.target), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
-          {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK, st.target>0?pdfAchievementColor(pct):PDF_BLACK], dots: st.target>0 ? {5: pdfAchievementColor(pct)} : null});
+        const base = st[baseField];
+        const pct = base>0 ? (sch.gap+base)/base*100 : 0;
+        tableRow(plMainCols, [label, fmtNumId(st.potensi), fmtNumId(st.pipelineTotal), fmtNumId(st.realisasi), fmtNumId(base), (sch.gap>=0?'+':'')+fmtNumId(sch.gap)],
+          {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK, base>0?pdfAchievementColor(pct):PDF_BLACK], dots: base>0 ? {5: pdfAchievementColor(pct)} : null});
       });
       y += 8;
       tableHeader(plCmpCols);
@@ -5425,8 +5486,9 @@ async function downloadSummaryPDF(){
       });
       y += 10;
     }
-    drawPipelineScheme("Laporan Realisasi — dari Realisasi", "realita");
-    drawPipelineScheme("Laporan Komitmen — dari Realisasi + Total Potensi", "komitmen");
+    drawPipelineScheme("Laporan Realisasi", "Realisasi vs Target", "realita", "target", "TARGET");
+    drawPipelineScheme("Laporan Komitmen", "Realisasi vs Komitmen", "komitmen", "komitmenVal", "KOMITMEN");
+    drawPipelineScheme("Laporan Kecukupan Dana", "(Realisasi + Total Potensi) vs Target", "kecukupan", "target", "TARGET");
 
     const totalPipelineAll = pipelineTotalPipeline(state.pipeline);
     const totalPotensiAll = pipelineTotalPotensi(state.pipeline);

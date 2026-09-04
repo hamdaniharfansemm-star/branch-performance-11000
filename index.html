@@ -1230,14 +1230,14 @@ async function fetchRaw(key){
       // secara diam-diam setelah jeda singkat. Kalau percobaan KEDUA juga
       // gagal, baru benar-benar dianggap gagal.
       try{
-        return await fetchRawOnce(key, 12000);
+        return await fetchRawOnce(key, 8000);
       }catch(firstErr){
-        await sleep(700);
-        return await fetchRawOnce(key, 12000);
+        await sleep(400);
+        return await fetchRawOnce(key, 8000);
       }
     }catch(e){
       const isTimeout = e && e.name === "AbortError";
-      window.__storageErrors.push(isTimeout ? `Waktu tunggu habis mengambil "${key}" (server tidak merespons dalam 12 detik, sudah dicoba 2x)` : String(e && e.message || e));
+      window.__storageErrors.push(isTimeout ? `Waktu tunggu habis mengambil "${key}" (server tidak merespons dalam 8 detik, sudah dicoba 2x)` : String(e && e.message || e));
       // PENTING: lempar ulang error ini (jangan kembalikan null begitu saja).
       // null harus HANYA berarti "key ini memang belum ada", bukan "gagal
       // mengambil data" — kalau dua kondisi ini dicampur, kode yang menyimpan
@@ -1278,15 +1278,15 @@ async function saveRaw(key, valueStr){
       // satu"), jadi mengulang kirim data yang sama tidak akan membuat data
       // ganda — hasil akhirnya tetap sama persis.
       try{
-        await saveRawOnce(key, valueStr, 15000);
+        await saveRawOnce(key, valueStr, 10000);
       }catch(firstErr){
-        await sleep(700);
-        await saveRawOnce(key, valueStr, 15000);
+        await sleep(400);
+        await saveRawOnce(key, valueStr, 10000);
       }
       return true;
     }catch(e){
       const isTimeout = e && e.name === "AbortError";
-      window.__storageErrors.push(isTimeout ? `Waktu tunggu habis menyimpan "${key}" (server tidak merespons dalam 15 detik, sudah dicoba 2x)` : String(e && e.message || e));
+      window.__storageErrors.push(isTimeout ? `Waktu tunggu habis menyimpan "${key}" (server tidak merespons dalam 10 detik, sudah dicoba 2x)` : String(e && e.message || e));
       return false;
     }
   }
@@ -1894,4 +1894,4 @@ document.getElementById("musicBtn").onclick = ()=>{
   document.addEventListener("visibilitychange", ()=>{ animPaused = document.hidden; });
   function tick(){
     if(!animPaused){
-      ctx.clea
+      ctx.clearRe

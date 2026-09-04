@@ -1512,8 +1512,8 @@ async function safeLoadMarketingForMonth(month){
    diberi antrian per-bulan supaya dua penyimpanan Pipeline yang hampir
    bersamaan untuk bulan yang sama tidak saling menimpa. */
 const __pipelineSaveQueues = new Map();
-async function mutatePipelineAndSave(mutatorFn){
-  const month = state.month;
+async function mutatePipelineAndSave(mutatorFn, overrideMonth){
+  const month = overrideMonth || state.month;
   async function doOne(){
     let fresh;
     try{
@@ -1551,6 +1551,59 @@ async function mutateMarketingAndSave(mutatorFn){
   const prevQueue = __marketingSaveQueues.get(month) || Promise.resolve();
   const myTurn = prevQueue.then(doOne, doOne);
   __marketingSaveQueues.set(month, myTurn.then(()=>{}, ()=>{}));
+  return myTurn;
+}
+/* Simpan SATU laporan akuisisi baru ke bulan yang BENAR sesuai TANGGAL yang
+   dipilih karyawan — bukan ke bulan yang kebetulan sedang tampil di layar.
+   Contoh: kalau layar sedang menampilkan September, tapi karyawan memilih
+   tanggal di Agustus saat lapor, laporan itu HARUS masuk hitungan Agustus,
+   bukan September (begitu juga sebaliknya). Kalau bulan tujuannya SAMA
+   dengan bulan yang sedang tampil, layar langsung diperbarui; kalau BEDA,
+   data tersimpan dengan benar di server tapi layar tetap menampilkan bulan
+   yang sedang aktif (tidak diam-diam berpindah bulan hanya karena satu
+   laporan). Antrian per-bulan mencegah dua laporan ke bulan yang sama
+   hampir bersamaan saling menimpa. */
+const __reportSubmitQueues = new Map();
+async function submitReportEntry(entry, entryMonth){
+  async function doOne(){
+    let fresh;
+    try{
+      fresh = await loadList(keyReports(entryMonth));
+    }catch(e){
+      window.__storageErrors.push(String(e && e.message || e));
+      return false;
+    }
+    fresh.push(entry);
+    const ok = await saveList(keyReports(entryMonth), fresh);
+    if(ok && state.month === entryMonth){ state.reports = fresh; rebuildIndex(); }
+    return ok;
+  }
+  const prevQueue = __reportSubmitQueues.get(entryMonth) || Promise.resolve();
+  const myTurn = prevQueue.then(doOne, doOne);
+  __reportSubmitQueues.set(entryMonth, myTurn.then(()=>{}, ()=>{}));
+  return myTurn;
+}
+/* Sama seperti submitReportEntry, tapi untuk Input Layanan Harian — laporan
+   masuk hitungan bulan sesuai TANGGAL yang dipilih, bukan bulan yang sedang
+   tampil di layar. */
+const __layananSubmitQueues = new Map();
+async function submitLayananEntry(entry, entryMonth){
+  async function doOne(){
+    let fresh;
+    try{
+      fresh = await loadList(keyLayanan(entryMonth));
+    }catch(e){
+      window.__storageErrors.push(String(e && e.message || e));
+      return false;
+    }
+    fresh.push(entry);
+    const ok = await saveList(keyLayanan(entryMonth), fresh);
+    if(ok && state.month === entryMonth){ state.layanan = fresh; }
+    return ok;
+  }
+  const prevQueue = __layananSubmitQueues.get(entryMonth) || Promise.resolve();
+  const myTurn = prevQueue.then(doOne, doOne);
+  __layananSubmitQueues.set(entryMonth, myTurn.then(()=>{}, ()=>{}));
   return myTurn;
 }
 async function loadMonthData(){
@@ -2415,11 +2468,19 @@ function renderLapor(){
     if(!note || !note.trim()){ toast("Keterangan wajib diisi (No. Rekening / Nama Usaha / catatan)", "⚠️"); return; }
     submitBtn.disabled = true; submitBtn.textContent = "⏳ Menyimpan...";
     const entry = {id:uid(), employee, product, amount:Number(amount), date, note, status:"pending", createdAt:Date.now()};
-    const ok = await mutateAndSave(keyReports(state.month), "reports", (fresh)=>{ fresh.push(entry); });
-    rebuildIndex();
+    // PENTING: laporan masuk ke hitungan bulan sesuai TANGGAL yang dipilih di
+    // form (bukan bulan yang kebetulan sedang tampil di layar) — supaya
+    // laporan tanggal Agustus tetap terhitung Agustus meski sedang membuka
+    // tab September, dan sebaliknya.
+    const entryMonth = date ? date.slice(0,7) : state.month;
+    const ok = await submitReportEntry(entry, entryMonth);
     submitBtn.disabled = false; submitBtn.textContent = "🚀 Kirim Laporan";
     if(!ok){ toast("Gagal menyimpan, cek koneksi & coba lagi", "⚠️"); return; }
-    toast(`Laporan ${product} untuk ${employee} terkirim — menunggu approval Admin`, "🎉");
+    if(entryMonth === state.month){
+      toast(`Laporan ${product} untuk ${employee} terkirim — menunggu approval Admin`, "🎉");
+    } else {
+      toast(`Laporan ${product} untuk ${employee} terkirim ke bulan ${monthLabelOf(entryMonth)} (sesuai tanggal dipilih) — menunggu approval Admin`, "🎉");
+    }
     playSound("bell");
     e.target.reset();
     if(state.tab !== "lapor") return; // pengguna sudah pindah tab, jangan sentuh elemen yang sudah tidak ada
@@ -2627,8 +2688,15 @@ function renderLayanan(){
       antrian:Number(document.getElementById("l_antrian").value||0),
       transaksi:Number(document.getElementById("l_transaksi").value||0),
     };
-    await mutateAndSave(keyLayanan(state.month), "layanan", (fresh)=>{ fresh.push(entry); });
-    toast(`Data layanan ${employee} tersimpan`, "✅");
+    // Sama seperti Lapor Akuisisi: masuk hitungan bulan sesuai TANGGAL yang
+    // dipilih, bukan bulan yang sedang tampil di layar.
+    const entryMonth = entry.date ? entry.date.slice(0,7) : state.month;
+    await submitLayananEntry(entry, entryMonth);
+    if(entryMonth === state.month){
+      toast(`Data layanan ${employee} tersimpan`, "✅");
+    } else {
+      toast(`Data layanan ${employee} tersimpan ke bulan ${monthLabelOf(entryMonth)} (sesuai tanggal dipilih)`, "✅");
+    }
     playSound("bell");
     e.target.reset();
     if(state.tab !== "layanan") return; // pengguna sudah pindah tab
@@ -3459,9 +3527,13 @@ function renderPipeline(){
       status: document.getElementById("pl_status").value,
       createdAt: Date.now(),
     };
-    const ok = await mutatePipelineAndSave( (fresh)=>{ fresh.push(entry); });
+    const ok = await mutatePipelineAndSave((fresh)=>{ fresh.push(entry); }, entry.tanggal ? entry.tanggal.slice(0,7) : state.month);
     if(!ok){ toast("Gagal menyimpan, coba lagi", "⚠️"); return; }
-    toast("Laporan pipeline terkirim", "🎉");
+    if(!entry.tanggal || entry.tanggal.slice(0,7) === state.month){
+      toast("Laporan pipeline terkirim", "🎉");
+    } else {
+      toast(`Laporan pipeline terkirim ke bulan ${monthLabelOf(entry.tanggal.slice(0,7))} (sesuai tanggal dipilih)`, "🎉");
+    }
     playSound("bell");
     e.target.reset();
     if(state.tab !== "pipeline") return;

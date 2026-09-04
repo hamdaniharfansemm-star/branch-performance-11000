@@ -679,7 +679,7 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
     <form id="loginForm">
       <div class="field" style="margin-top:22px" id="loginNIPField">
         <label>Login</label>
-        <input type="text" id="loginNIP" inputmode="numeric" placeholder="Masukkan NIP Anda" autocomplete="off" required>
+        <input type="text" id="loginNIP" inputmode="numeric" placeholder="Masukkan NIP Anda" autocomplete="off">
       </div>
       <div id="loginStep2"></div>
       <button type="submit" class="btn primary" id="loginSubmitBtn" style="width:100%;justify-content:center;margin-top:8px">🔐 Masuk ke Dashboard</button>
@@ -1894,4 +1894,4 @@ document.getElementById("musicBtn").onclick = ()=>{
   document.addEventListener("visibilitychange", ()=>{ animPaused = document.hidden; });
   function tick(){
     if(!animPaused){
-      ctx.clearRe
+      ctx.clearRect(0,0,W,

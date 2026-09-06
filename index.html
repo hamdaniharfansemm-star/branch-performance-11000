@@ -4242,6 +4242,27 @@ function drawPipelineList(filtered){
   }
 }
 
+/* Sama seperti saveEditedReport: kalau tanggal diubah ke bulan berbeda,
+   entri Pipeline harus DIPINDAHKAN ke penyimpanan bulan yang benar, bukan
+   cuma field tanggalnya yang berubah di tempat lama. */
+async function saveEditedPipelineEntry(entryId, edits, sourceMonth){
+  const newMonth = edits.tanggal ? edits.tanggal.slice(0,7) : sourceMonth;
+  if(newMonth === sourceMonth){
+    return await mutatePipelineAndSave((fresh)=>{
+      const target = fresh.find(x=>x.id===entryId);
+      if(target) Object.assign(target, edits);
+    }, sourceMonth);
+  }
+  const original = state.pipeline.find(x=>x.id===entryId) || {};
+  const updatedEntry = {...original, ...edits, id: entryId};
+  const okAdd = await mutatePipelineAndSave((fresh)=>{ fresh.push(updatedEntry); }, newMonth);
+  if(!okAdd) return false;
+  const okRemove = await mutatePipelineAndSave((fresh)=>{
+    const idx = fresh.findIndex(x=>x.id===entryId);
+    if(idx>=0) fresh.splice(idx,1);
+  }, sourceMonth);
+  return okRemove;
+}
 function openEditPipeline(id){
   const entry = state.pipeline.find(x=>x.id===id);
   if(!entry) return;
@@ -4292,11 +4313,8 @@ function openEditPipeline(id){
       tanggal: document.getElementById("ep_tanggal").value,
       status: document.getElementById("ep_status").value,
     };
-    await mutatePipelineAndSave( (fresh)=>{
-      const target = fresh.find(x=>x.id===entry.id);
-      if(target) Object.assign(target, edits);
-    });
-    toast("Pipeline berhasil diperbarui", "✅");
+    await saveEditedPipelineEntry(entry.id, edits, state.month);
+    toast(edits.tanggal && edits.tanggal.slice(0,7)!==state.month ? `Pipeline berhasil dipindahkan ke bulan ${monthLabelOf(edits.tanggal.slice(0,7))}` : "Pipeline berhasil diperbarui", "✅");
     playSound("bell");
     closeModal();
     if(state.tab === "pipeline") refreshPipelineView();
@@ -4349,11 +4367,8 @@ function openEditPipelineKaryawan(id){
       tanggal: document.getElementById("ek_tanggal").value,
       status: document.getElementById("ek_status").value,
     };
-    await mutatePipelineAndSave( (fresh)=>{
-      const target = fresh.find(x=>x.id===entry.id);
-      if(target) Object.assign(target, edits);
-    });
-    toast("Laporan pipeline berhasil diperbarui", "✅");
+    await saveEditedPipelineEntry(entry.id, edits, state.month);
+    toast(edits.tanggal && edits.tanggal.slice(0,7)!==state.month ? `Laporan pipeline berhasil dipindahkan ke bulan ${monthLabelOf(edits.tanggal.slice(0,7))}` : "Laporan pipeline berhasil diperbarui", "✅");
     playSound("bell");
     closeModal();
     if(state.tab === "pipeline") refreshPipelineView();
@@ -5401,6 +5416,33 @@ function adminRowHTML(r){
     </div>
   `;
 }
+/* Kalau tanggal diubah ke bulan yang BERBEDA dari bulan tempat entri ini
+   sekarang tersimpan, entrinya harus DIPINDAHKAN ke penyimpanan bulan yang
+   benar — bukan cuma mengubah field tanggalnya di tempat (itulah penyebab
+   bug "laporan tanggal Agustus tapi kok masuk hitungan September": entri
+   yang di-edit tanggalnya diubah ke bulan lain TETAP tersimpan di bulan
+   lama, cuma field tanggalnya yang berubah). Urutan sengaja: TAMBAHKAN dulu
+   ke bulan baru, baru HAPUS dari bulan lama — supaya kalau ada kegagalan di
+   tengah jalan, yang terjadi paling buruk adalah data GANDA (masih bisa
+   diperbaiki manual), bukan data HILANG. */
+async function saveEditedReport(reportId, edits, sourceMonth){
+  const newMonth = edits.date ? edits.date.slice(0,7) : sourceMonth;
+  if(newMonth === sourceMonth){
+    return await mutateAndSave(keyReports(sourceMonth), "reports", (fresh)=>{
+      const target = fresh.find(x=>x.id===reportId);
+      if(target) Object.assign(target, edits);
+    });
+  }
+  const original = state.reports.find(x=>x.id===reportId) || {};
+  const updatedEntry = {...original, ...edits, id: reportId};
+  const okAdd = await submitReportEntry(updatedEntry, newMonth);
+  if(!okAdd) return false;
+  const okRemove = await mutateAndSave(keyReports(sourceMonth), "reports", (fresh)=>{
+    const idx = fresh.findIndex(x=>x.id===reportId);
+    if(idx>=0) fresh.splice(idx,1);
+  });
+  return okRemove;
+}
 function openEditReport(id){
   const r = state.reports.find(x=>x.id===id);
   if(!r) return;
@@ -5443,12 +5485,9 @@ function openEditReport(id){
       note: document.getElementById("e_note").value,
       status: document.getElementById("e_status").value,
     };
-    await mutateAndSave(keyReports(state.month), "reports", (fresh)=>{
-      const target = fresh.find(x=>x.id===r.id);
-      if(target) Object.assign(target, edits);
-    });
+    await saveEditedReport(r.id, edits, state.month);
     rebuildIndex();
-    toast("Laporan berhasil diperbarui", "✅");
+    toast(edits.date && edits.date.slice(0,7)!==state.month ? `Laporan berhasil dipindahkan ke bulan ${monthLabelOf(edits.date.slice(0,7))}` : "Laporan berhasil diperbarui", "✅");
     closeModal();
     if(state.tab === "admin" && document.getElementById("adminList")){
       const allNow = [...(state._dupMarked||markDuplicates(state.reports))].sort((a,b)=>b.createdAt-a.createdAt);

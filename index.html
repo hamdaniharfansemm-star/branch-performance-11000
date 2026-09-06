@@ -716,6 +716,7 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
   <div class="tabs-scroller-wrap">
     <button class="tabs-arrow tabs-arrow-l" id="tabsArrowL" aria-label="Geser ke kiri">‹</button>
     <nav class="tabs" id="tabs">
+      <button data-tab="maindash">📈 Main Dashboard</button>
       <button data-tab="dashboard" class="active">📊 Dashboard</button>
       <button data-tab="lapor">📝 Lapor Akuisisi</button>
       <button data-tab="leaderboard">🏆 Leaderboard</button>
@@ -945,6 +946,7 @@ function defaultConfig(){
     pipelineSectionOrder: ["filter","kpi","jenis","target","lapor","list"],
     leaderboardSectionOrder: ["chips","list"],
     layananSectionOrder: ["layananInput","layananLB","efisiensi","layananDetail","penilaianInput","penilaianLB","penilaianDetail"],
+    maindashSectionOrder: ["employees","products","fund","layanan"],
   };
 }
 let CFG = defaultConfig();
@@ -1606,6 +1608,45 @@ async function submitLayananEntry(entry, entryMonth){
   __layananSubmitQueues.set(entryMonth, myTurn.then(()=>{}, ()=>{}));
   return myTurn;
 }
+/* ============================================================
+   MAIN DASHBOARD — data tahunan (agregasi 12 bulan)
+   ============================================================ */
+const __yearlyDataCache = new Map(); // year -> {reports:[...12 arrays...], pipeline:[...12 arrays...]}
+/* Ambil data Lapor Akuisisi & Pipeline Dana untuk SELURUH 12 bulan di satu
+   tahun, dalam SATU permintaan gabungan (sama seperti optimasi login) —
+   supaya menampilkan grafik tahunan tidak perlu ±24+ permintaan terpisah.
+   Hasil disimpan di cache per-tahun selama sesi ini (data bulan yang sudah
+   lewat tidak berubah-ubah, jadi aman di-cache) — pindah tab/ganti tahun
+   berikutnya jadi instan tanpa perlu memuat ulang dari server. */
+async function loadYearlyData(year, forceRefresh){
+  if(!forceRefresh && __yearlyDataCache.has(year)) return __yearlyDataCache.get(year);
+  const months = [];
+  for(let m=1;m<=12;m++) months.push(monthKeyOf(year, m));
+  const allKeys = [];
+  months.forEach(mo=>{
+    const rk = keyReports(mo), pk = keyPipeline(mo), lk = keyLayanan(mo), pnk = keyPenilaian(mo);
+    allKeys.push(rk, `${rk}::c0`, pk, `${pk}::c0`, lk, `${lk}::c0`, pnk, `${pnk}::c0`);
+  });
+  // Legacy pipeline hanya perlu dicek sekali (bukan per-bulan) untuk migrasi.
+  allKeys.push(KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`);
+  await preloginBatchFetch(allKeys);
+  const reportsByMonth = {}, pipelineByMonth = {}, layananByMonth = {}, penilaianByMonth = {};
+  for(const mo of months){
+    try{ reportsByMonth[mo] = await loadList(keyReports(mo)); }
+    catch(e){ reportsByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
+    try{ pipelineByMonth[mo] = await loadPipelineForMonth(mo); }
+    catch(e){ pipelineByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
+    try{ layananByMonth[mo] = await loadList(keyLayanan(mo)); }
+    catch(e){ layananByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
+    try{ penilaianByMonth[mo] = await loadList(keyPenilaian(mo)); }
+    catch(e){ penilaianByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
+  }
+  __loginPrefetchCache = null; // cache batch sekali pakai, kosongkan lagi
+  const result = {months, reportsByMonth, pipelineByMonth, layananByMonth, penilaianByMonth};
+  __yearlyDataCache.set(year, result);
+  return result;
+}
+
 async function loadMonthData(){
   const [r,l,p,ld,inf,pl,mk] = await Promise.all([
     safeLoadList(keyReports(state.month)),
@@ -2013,6 +2054,7 @@ document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>setTab(b.d
 
 function render(){
   const renderers = {
+    maindash: renderMainDashboard,
     dashboard: renderDashboard,
     lapor: renderLapor,
     leaderboard: renderLeaderboard,
@@ -2041,6 +2083,341 @@ function applyBranding(){
 }
 
 /* ---------------- DASHBOARD ---------------- */
+/* ============================================================
+   MAIN DASHBOARD — agregasi & tampilan
+   ============================================================ */
+function aggregateAnnualEmployeeStats(yearly){
+  const perEmployee = {};
+  yearly.months.forEach(mo=>{
+    (yearly.reportsByMonth[mo]||[]).forEach(r=>{
+      if(r.status !== "approved") return;
+      if(!perEmployee[r.employee]) perEmployee[r.employee] = {};
+      perEmployee[r.employee][r.product] = (perEmployee[r.employee][r.product]||0) + Number(r.amount||0);
+    });
+  });
+  return CFG.employees.map(emp=>{
+    const achieved = perEmployee[emp.name] || {};
+    let totalAchieved = 0, totalTarget = 0;
+    CFG.products.forEach(prod=>{
+      totalAchieved += achieved[prod] || 0;
+      totalTarget += (emp.targets[prod]||0) * 12;
+    });
+    return {
+      name: emp.name, team: emp.team, achieved, totalAchieved, totalTarget,
+      pct: totalTarget>0 ? totalAchieved/totalTarget : 0,
+    };
+  }).sort((a,b)=>b.pct-a.pct);
+}
+function aggregateAnnualProductStats(yearly){
+  return CFG.products.map(prod=>{
+    let totalAchieved = 0;
+    yearly.months.forEach(mo=>{
+      (yearly.reportsByMonth[mo]||[]).forEach(r=>{
+        if(r.status==="approved" && r.product===prod) totalAchieved += Number(r.amount||0);
+      });
+    });
+    let totalTarget = 0;
+    CFG.employees.forEach(emp=>{ totalTarget += (emp.targets[prod]||0) * 12; });
+    return {product: prod, achieved: totalAchieved, target: totalTarget, pct: totalTarget>0?totalAchieved/totalTarget:0};
+  });
+}
+function aggregateAnnualFundStats(yearly, jenisList){
+  return yearly.months.map(mo=>{
+    const mCfg = getPipelineMonthCfg(mo);
+    const target = jenisList.reduce((s,j)=>s+(mCfg.targets[j]||0),0);
+    const komitmenVal = jenisList.reduce((s,j)=>s+(mCfg.komitmen[j]||0),0);
+    const realisasi = jenisList.reduce((s,j)=>s+(mCfg.realisasi[j]||0),0);
+    const scoped = (yearly.pipelineByMonth[mo]||[]).filter(e=>jenisList.includes(e.jenis));
+    const potensi = pipelineTotalPotensi(scoped);
+    return {month: mo, target, komitmenVal, realisasi, combined: realisasi+potensi};
+  });
+}
+function aggregateAnnualLayananStats(yearly){
+  const perEmployee = {};
+  yearly.months.forEach(mo=>{
+    (yearly.layananByMonth[mo]||[]).forEach(r=>{
+      if(!perEmployee[r.employee]) perEmployee[r.employee] = {nasabahSum:0, antrianSum:0, transaksiSum:0, count:0};
+      const e = perEmployee[r.employee];
+      e.nasabahSum += Number(r.nasabah||0);
+      e.antrianSum += Number(r.antrian||0);
+      e.transaksiSum += Number(r.transaksi||0);
+      e.count++;
+    });
+  });
+  return Object.keys(perEmployee).map(name=>{
+    const e = perEmployee[name];
+    return {
+      name, count: e.count,
+      nasabah: e.count>0 ? e.nasabahSum/e.count : 0,
+      antrian: e.count>0 ? e.antrianSum/e.count : 0,
+      transaksi: e.count>0 ? e.transaksiSum/e.count : 0,
+    };
+  }).sort((a,b)=>b.nasabah-a.nasabah);
+}
+function aggregateAnnualPenilaianStats(yearly){
+  const perTarget = {};
+  yearly.months.forEach(mo=>{
+    (yearly.penilaianByMonth[mo]||[]).forEach(r=>{
+      if(!perTarget[r.target]) perTarget[r.target] = {scoreSum:0, count:0};
+      perTarget[r.target].scoreSum += Number(r.score||0);
+      perTarget[r.target].count++;
+    });
+  });
+  return Object.keys(perTarget).map(name=>{
+    const t = perTarget[name];
+    return {name, count: t.count, avg: t.count>0 ? t.scoreSum/t.count : 0};
+  }).sort((a,b)=>b.avg-a.avg);
+}
+
+async function renderMainDashboard(){
+  const currentYear = parseInt(state.month.split("-")[0], 10);
+  view.innerHTML = `
+    <h2 class="sec">📈 Main Dashboard — Kinerja Tahunan <span class="line"></span></h2>
+    <div class="card glow" style="margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div class="field" style="max-width:160px;margin:0"><label>Tahun</label>
+        <select id="mdYearSelect">
+          ${Array.from({length:YEAR_MAX-YEAR_MIN+1},(_, i)=>YEAR_MIN+i).map(y=>`<option value="${y}" ${y===currentYear?'selected':''}>${y}</option>`).join("")}
+        </select>
+      </div>
+      <p class="hint" style="margin:0;flex:1;min-width:200px">Menampilkan rangkuman kinerja seluruh 12 bulan di tahun yang dipilih — data historis, tidak mengubah data bulan mana pun.</p>
+    </div>
+    <div id="mdLoadingBox" class="card glow" style="text-align:center;padding:40px">
+      <div class="spinner-ring"></div>
+      <p style="margin-top:14px;color:var(--ink-200)">Memuat data 12 bulan...</p>
+    </div>
+    <div id="mdContent" style="display:none"></div>
+  `;
+  document.getElementById("mdYearSelect").onchange = ()=> loadAndDrawMainDashboard(parseInt(document.getElementById("mdYearSelect").value,10));
+  await loadAndDrawMainDashboard(currentYear);
+}
+
+async function loadAndDrawMainDashboard(year){
+  const loadingBox = document.getElementById("mdLoadingBox");
+  const content = document.getElementById("mdContent");
+  if(!loadingBox || !content) return; // pengguna sudah pindah tab sebelum ini selesai
+  loadingBox.style.display = "block";
+  content.style.display = "none";
+  let yearly;
+  try{
+    yearly = await loadYearlyData(year);
+  }catch(e){
+    loadingBox.innerHTML = `<p class="hint" style="color:var(--danger)">Gagal memuat data tahun ${year}. Coba lagi.</p>`;
+    return;
+  }
+  if(state.tab !== "maindash") return; // pengguna sudah pindah tab selama proses memuat
+  loadingBox.style.display = "none";
+  content.style.display = "block";
+  drawMainDashboardContent(yearly, year, content);
+}
+
+function drawMainDashboardContent(yearly, year, content){
+  const empStats = aggregateAnnualEmployeeStats(yearly);
+  const prodStats = aggregateAnnualProductStats(yearly);
+  const layananStats = aggregateAnnualLayananStats(yearly);
+  const penilaianStats = aggregateAnnualPenilaianStats(yearly);
+
+  const defaults = SECTION_ORDER_DEFAULTS.maindash;
+  const order = (Array.isArray(CFG.maindashSectionOrder) && CFG.maindashSectionOrder.length===defaults.length)
+    ? CFG.maindashSectionOrder : defaults;
+
+  const teams = ["", ...CFG.teams];
+  const sections = {
+    employees: `
+      <h2 class="sec">👤 Kinerja Karyawan Tahunan per Produk (${year}) <span class="line"></span></h2>
+      <div class="card glow" style="margin-bottom:18px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+          <p class="hint" style="margin:0;flex:1;min-width:220px">Total akuisisi disetujui sepanjang ${year} dibandingkan target tahunan (target bulanan × 12).</p>
+          <div class="field" style="max-width:200px;margin:0"><label>Filter Tim</label>
+            <select id="mdTeamFilter"><option value="">Semua Tim</option>${CFG.teams.map(t=>`<option value="${t}">${t}</option>`).join("")}</select>
+          </div>
+        </div>
+        <div style="overflow-x:auto" id="mdEmployeeTableWrap"></div>
+      </div>`,
+    products: `
+      <h2 class="sec">📦 Akuisisi Produk terhadap Target — Tahunan (${year}) <span class="line"></span></h2>
+      <div class="chart-card-light" id="mdProductChart" style="margin-bottom:18px"></div>`,
+    fund: `
+      <h2 class="sec">💰 Laporan Dana Tahunan (${year}) <span class="line"></span></h2>
+      <div class="chart-card-light" style="margin-bottom:18px">
+        <div class="chip-row" id="mdJenisChips" style="margin-bottom:14px">
+          <button class="chip active" data-jenis="dpk">DPK (semua)</button>
+          <button class="chip" data-jenis="casa">CASA</button>
+          <button class="chip" data-jenis="Tabungan">Tabungan</button>
+          <button class="chip" data-jenis="Giro">Giro</button>
+          <button class="chip" data-jenis="Deposito">Deposito</button>
+        </div>
+        <p class="hint" style="margin:-6px 0 12px" id="mdFundHint">Tabungan + Giro + Deposito digabung. Setiap titik adalah nilai di bulan tersebut (bukan akumulasi).</p>
+        <div id="mdFundChart"></div>
+      </div>`,
+    layanan: `
+      <h2 class="sec">🛎️ Layanan &amp; Support Tahunan (${year}) <span class="line"></span></h2>
+      <div class="grid cols-2" style="gap:16px;margin-bottom:18px">
+        <div class="card glow">
+          <h3 class="sub" style="margin-bottom:12px">🎧 Rata-rata Layanan Nasabah (CS &amp; Teller)</h3>
+          <div style="overflow-x:auto"><table class="data">
+            <thead><tr><th>#</th><th>Nama</th><th>Rata² Nasabah</th><th>Rata² Antrian</th><th>Rata² Transaksi</th></tr></thead>
+            <tbody>
+              ${layananStats.length ? layananStats.slice(0,15).map((e,i)=>`
+                <tr><td>${i+1}</td><td>${e.name}</td>
+                  <td style="text-align:right">${e.nasabah.toFixed(1)}</td>
+                  <td style="text-align:right">${e.antrian.toFixed(1)}</td>
+                  <td style="text-align:right">${e.transaksi.toFixed(1)}</td>
+                </tr>`).join("") : `<tr><td colspan="5" class="hint" style="text-align:center;padding:16px">Belum ada data Layanan di tahun ${year}.</td></tr>`}
+            </tbody>
+          </table></div>
+        </div>
+        <div class="card glow">
+          <h3 class="sub" style="margin-bottom:12px">🥇 Rata-rata Penilaian Support</h3>
+          <div style="overflow-x:auto"><table class="data">
+            <thead><tr><th>#</th><th>Nama</th><th>Rata² Skor</th><th>Jumlah Penilaian</th></tr></thead>
+            <tbody>
+              ${penilaianStats.length ? penilaianStats.slice(0,15).map((e,i)=>{
+                const col = e.avg>=85?"ok":e.avg>=70?"warn":"danger";
+                return `<tr><td>${i+1}</td><td>${e.name}</td>
+                  <td style="text-align:right"><span class="badge ${col}">${e.avg.toFixed(1)}</span></td>
+                  <td style="text-align:right">${e.count}</td>
+                </tr>`;
+              }).join("") : `<tr><td colspan="4" class="hint" style="text-align:center;padding:16px">Belum ada data Penilaian di tahun ${year}.</td></tr>`}
+            </tbody>
+          </table></div>
+        </div>
+      </div>`,
+  };
+
+  content.innerHTML = order.map(k=>sections[k]||"").join("\n");
+
+  drawAnnualProductChart(prodStats);
+
+  const JENIS_GROUPS = {
+    dpk: {list:["Tabungan","Giro","Deposito"], label:"Tabungan + Giro + Deposito digabung."},
+    casa: {list:["Tabungan","Giro"], label:"Tabungan + Giro digabung (CASA)."},
+    Tabungan: {list:["Tabungan"], label:"Hanya jenis Tabungan."},
+    Giro: {list:["Giro"], label:"Hanya jenis Giro."},
+    Deposito: {list:["Deposito"], label:"Hanya jenis Deposito."},
+  };
+  function redrawFundChart(jenisKey){
+    const g = JENIS_GROUPS[jenisKey];
+    const hint = document.getElementById("mdFundHint");
+    if(hint) hint.textContent = `${g.label} Setiap titik adalah nilai di bulan tersebut (bukan akumulasi).`;
+    drawAnnualFundChart(aggregateAnnualFundStats(yearly, g.list));
+  }
+  const chipsBox = document.getElementById("mdJenisChips");
+  if(chipsBox){
+    chipsBox.querySelectorAll(".chip").forEach(btn=>{
+      btn.onclick = ()=>{
+        chipsBox.querySelectorAll(".chip").forEach(b=>b.classList.remove("active"));
+        btn.classList.add("active");
+        redrawFundChart(btn.dataset.jenis);
+      };
+    });
+    redrawFundChart("dpk");
+  }
+
+  function redrawEmployeeTable(teamFilter){
+    const wrap = document.getElementById("mdEmployeeTableWrap");
+    if(!wrap) return;
+    const filtered = teamFilter ? empStats.filter(e=>e.team===teamFilter) : empStats;
+    wrap.innerHTML = `<table class="data">
+      <thead><tr><th>#</th><th>Nama</th><th>Tim</th><th style="text-align:right">Total Unit</th><th style="text-align:right">Target Tahunan</th><th style="text-align:right">Capaian</th></tr></thead>
+      <tbody>
+        ${filtered.length ? filtered.map((e,i)=>{
+          const col = statusFor(e.pct).cls;
+          const dot = col==="ok"?"🟢":col==="warn"?"🟡":"🔴";
+          return `<tr>
+            <td>${i+1}</td><td>${e.name}</td><td>${e.team}</td>
+            <td style="text-align:right">${e.totalAchieved}</td>
+            <td style="text-align:right">${e.totalTarget}</td>
+            <td style="text-align:right"><span class="badge ${col}">${dot} ${pctStr(e.pct)}</span></td>
+          </tr>`;
+        }).join("") : `<tr><td colspan="6" class="hint" style="text-align:center;padding:16px">Tidak ada karyawan di tim ini.</td></tr>`}
+      </tbody>
+    </table>`;
+  }
+  const teamFilterEl = document.getElementById("mdTeamFilter");
+  if(teamFilterEl){
+    teamFilterEl.onchange = ()=> redrawEmployeeTable(teamFilterEl.value);
+    redrawEmployeeTable("");
+  }
+}
+
+function drawAnnualProductChart(prodStats){
+  const box = document.getElementById("mdProductChart");
+  if(!box) return;
+  const maxV = Math.max(1, ...prodStats.map(d=>Math.max(d.achieved, d.target)));
+  const W = box.clientWidth || 900, H = 300;
+  const padL=45, padB=75, padT=20, padR=20;
+  const chW = W-padL-padR, chH = H-padT-padB;
+  const groupW = chW/prodStats.length;
+  const bw = groupW*0.3;
+  let bars = "", labels = "", grid = "";
+  [0, maxV*0.5, maxV].forEach(v=>{
+    const y = padT+chH-(v/maxV)*chH;
+    grid += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="rgba(255,255,255,0.1)"/>`;
+  });
+  prodStats.forEach((d,i)=>{
+    const cx = padL + groupW*(i+0.5);
+    const hAch = (d.achieved/maxV)*chH, yAch = padT+chH-hAch;
+    const hTar = (d.target/maxV)*chH, yTar = padT+chH-hTar;
+    bars += `<rect x="${cx-bw-2}" y="${yAch}" width="${bw}" height="${hAch}" rx="4" fill="#5aa8ff" style="filter:drop-shadow(0 0 6px rgba(90,168,255,0.7))"/>`;
+    bars += `<rect x="${cx+2}" y="${yTar}" width="${bw}" height="${hTar}" rx="4" fill="rgba(244,201,93,0.5)"/>`;
+    labels += `<text x="${cx}" y="${H-padB+18}" text-anchor="middle" font-size="10" font-weight="700" fill="#dde5f2" transform="rotate(-18 ${cx} ${H-padB+18})">${d.product}</text>`;
+  });
+  box.innerHTML = `
+    <h3 class="sub">Total Unit Tercapai vs Target Tahunan per Produk</h3>
+    <div style="display:flex;gap:14px;margin-bottom:8px;font-size:11px;color:var(--ink-400)">
+      <span><span style="display:inline-block;width:10px;height:10px;background:#5aa8ff;border-radius:2px;margin-right:4px"></span>Tercapai</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:rgba(244,201,93,0.5);border-radius:2px;margin-right:4px"></span>Target</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible">${grid}${bars}${labels}</svg>
+  `;
+}
+
+function drawAnnualFundChart(fundStats){
+  const box = document.getElementById("mdFundChart");
+  if(!box) return;
+  const allVals = fundStats.flatMap(d=>[d.target, d.komitmenVal, d.realisasi, d.combined]);
+  const maxV = Math.max(1, ...allVals);
+  const W = box.clientWidth || 900, H = 300;
+  const padL=55, padB=45, padT=20, padR=20;
+  const chW = W-padL-padR, chH = H-padT-padB;
+  const stepX = chW/(fundStats.length-1 || 1);
+  function pathFor(key, color){
+    const pts = fundStats.map((d,i)=>{
+      const x = padL + stepX*i;
+      const y = padT + chH - (d[key]/maxV)*chH;
+      return `${x},${y}`;
+    });
+    return `<polyline points="${pts.join(" ")}" fill="none" stroke="${color}" stroke-width="2.5" style="filter:drop-shadow(0 0 5px ${color})"/>`;
+  }
+  let grid = "", labels = "";
+  [0, maxV*0.5, maxV].forEach(v=>{
+    const y = padT+chH-(v/maxV)*chH;
+    grid += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="rgba(255,255,255,0.1)"/>`;
+    grid += `<text x="${padL-8}" y="${y+3}" text-anchor="end" font-size="9.5" fill="var(--ink-400)">${fmtNumId(Math.round(v))}</text>`;
+  });
+  fundStats.forEach((d,i)=>{
+    const x = padL + stepX*i;
+    labels += `<text x="${x}" y="${H-padB+18}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#dde5f2">${MONTH_NAMES[parseInt(d.month.split("-")[1],10)-1].slice(0,3)}</text>`;
+  });
+  box.innerHTML = `
+    <h3 class="sub">Realisasi, Komitmen, Target &amp; Kecukupan Potensi Dana Masuk — Tren Bulanan</h3>
+    <div style="display:flex;gap:14px;margin-bottom:8px;font-size:11px;color:var(--ink-400);flex-wrap:wrap">
+      <span><span style="display:inline-block;width:10px;height:3px;background:#5aa8ff;margin-right:4px"></span>Realisasi</span>
+      <span><span style="display:inline-block;width:10px;height:3px;background:#f4c95d;margin-right:4px"></span>Target</span>
+      <span><span style="display:inline-block;width:10px;height:3px;background:#c586ff;margin-right:4px"></span>Komitmen</span>
+      <span><span style="display:inline-block;width:10px;height:3px;background:#3ee08e;margin-right:4px"></span>Realisasi+Potensi</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible">
+      ${grid}
+      ${pathFor("target", "#f4c95d")}
+      ${pathFor("komitmenVal", "#c586ff")}
+      ${pathFor("combined", "#3ee08e")}
+      ${pathFor("realisasi", "#5aa8ff")}
+      ${labels}
+    </svg>
+  `;
+}
+
 function renderDashboard(){
   const stats = allEmployeeStats();
   const top = stats[0] && stats[0].overall > 0 ? stats[0] : null;
@@ -4424,6 +4801,13 @@ function renderAdmin(){
 
     <div class="card glow" style="margin-bottom:18px">
       <div class="orb o-blue"></div>
+      <h3 class="sub">📐 Susun Tata Letak Main Dashboard</h3>
+      <p class="hint" style="margin-bottom:14px">Atur urutan bagian yang tampil di halaman Main Dashboard (kinerja tahunan) — berlaku untuk semua orang yang membuka aplikasi.</p>
+      <div id="maindashLayoutList"></div>
+    </div>
+
+    <div class="card glow" style="margin-bottom:18px">
+      <div class="orb o-blue"></div>
       <h3 class="sub">🔍 Cek Data Tersimpan di Server</h3>
       <p class="hint" style="margin-bottom:14px">Lihat langsung semua data yang benar-benar tersimpan di Google Sheet Anda saat ini — berguna untuk memastikan tidak ada data yang hilang atau tersesat.</p>
       <button class="btn ghost sm" id="diagCheckBtn">🔎 Cek Sekarang</button>
@@ -4457,6 +4841,7 @@ function renderAdmin(){
   drawPipelineLayoutList();
   drawLeaderboardLayoutList();
   drawLayananLayoutList();
+  drawMaindashLayoutList();
   wireMasterDataForms();
   document.getElementById("diagCheckBtn").onclick = checkStoredData;
   document.getElementById("addAdminForm").onsubmit = async (e)=>{
@@ -4846,18 +5231,26 @@ const SECTION_LABELS = {
     penilaianLB: "🥇 Leaderboard Support",
     penilaianDetail: "📋 Detail Laporan Penilaian",
   },
+  maindash: {
+    employees: "👤 Kinerja Karyawan Tahunan per Produk",
+    products: "📦 Akuisisi Produk terhadap Target",
+    fund: "💰 Laporan Dana Tahunan",
+    layanan: "🛎️ Layanan &amp; Support Tahunan",
+  },
 };
 const SECTION_ORDER_DEFAULTS = {
   dashboard: ["kpi","teams","topPerTeam","chart","top5","products"],
   pipeline: ["filter","kpi","jenis","target","lapor","list"],
   leaderboard: ["chips","list"],
   layanan: ["layananInput","layananLB","efisiensi","layananDetail","penilaianInput","penilaianLB","penilaianDetail"],
+  maindash: ["employees","products","fund","layanan"],
 };
 const SECTION_ORDER_CFG_KEY = {
   dashboard: "dashboardSectionOrder",
   pipeline: "pipelineSectionOrder",
   leaderboard: "leaderboardSectionOrder",
   layanan: "layananSectionOrder",
+  maindash: "maindashSectionOrder",
 };
 function drawLayoutList(pageKey, boxId){
   const box = document.getElementById(boxId);
@@ -4895,6 +5288,7 @@ function drawDashLayoutList(){ drawLayoutList("dashboard", "dashLayoutList"); }
 function drawPipelineLayoutList(){ drawLayoutList("pipeline", "pipelineLayoutList"); }
 function drawLeaderboardLayoutList(){ drawLayoutList("leaderboard", "leaderboardLayoutList"); }
 function drawLayananLayoutList(){ drawLayoutList("layanan", "layananLayoutList"); }
+function drawMaindashLayoutList(){ drawLayoutList("maindash", "maindashLayoutList"); }
 
 /* ---- Form-form Tambah (Karyawan/Produk/Tim/Branding) ---- */
 function wireMasterDataForms(){
@@ -5306,6 +5700,7 @@ async function downloadCurrentPagePDF(){
     toast("Menyiapkan PDF...", "⏳");
     await ensureJsPDF();
     const routes = {
+      maindash: pdfMainDashboardDetail,
       dashboard: pdfDashboardDetail,
       lapor: pdfLaporDetail,
       leaderboard: pdfLeaderboardDetail,
@@ -5317,11 +5712,75 @@ async function downloadCurrentPagePDF(){
       admin: pdfAdminDetail,
     };
     const fn = routes[state.tab] || pdfDashboardDetail;
-    fn();
+    await fn();
     playSound("drum");
   }catch(err){
     toast("Gagal membuat PDF, coba lagi", "⚠️");
   }
+}
+
+async function pdfMainDashboardDetail(){
+  const yearSelectEl = document.getElementById("mdYearSelect");
+  const year = parseInt((yearSelectEl && yearSelectEl.value) || state.month.split("-")[0], 10);
+  const yearly = await loadYearlyData(year);
+  const empStats = aggregateAnnualEmployeeStats(yearly);
+  const prodStats = aggregateAnnualProductStats(yearly);
+  const fundStats = aggregateAnnualFundStats(yearly, PIPELINE_JENIS);
+  const layananStats = aggregateAnnualLayananStats(yearly);
+  const penilaianStats = aggregateAnnualPenilaianStats(yearly);
+
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Main Dashboard — ${year}`);
+  p.newPage(`Main Dashboard — Kinerja Tahunan ${year}`);
+  p.paragraph(`Rangkuman seluruh 12 bulan tahun ${year}.`, {bold:true});
+  p.setY(p.getY()+8);
+
+  p.sectionTitle("Kinerja Karyawan Tahunan per Produk — 15 Teratas");
+  const empCols = [{label:"#",w:32},{label:"NAMA",w:170},{label:"TIM",w:110},{label:"TOTAL UNIT",w:75,align:"right"},{label:"TARGET TAHUNAN",w:80,align:"right"},{label:"CAPAIAN",w:48,align:"right"}];
+  p.tableHeader(empCols);
+  empStats.slice(0,15).forEach((e,i)=>{
+    const col = pdfAchievementColor(e.pct*100);
+    p.tableRow(empCols, [`${i+1}`, e.name, e.team, e.totalAchieved, e.totalTarget, pctStr(e.pct)], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots:{5:col}});
+  });
+  p.setY(p.getY()+10);
+
+  p.sectionTitle("Akuisisi Produk terhadap Target — Tahunan");
+  const prodCols = [{label:"PRODUK",w:130},{label:"UNIT TERCAPAI",w:100,align:"right"},{label:"TARGET TAHUNAN",w:100,align:"right"},{label:"CAPAIAN",w:80,align:"right"}];
+  p.tableHeader(prodCols);
+  prodStats.forEach((d,i)=>{
+    const col = d.target>0 ? pdfAchievementColor(d.pct*100) : PDF_BLACK;
+    p.tableRow(prodCols, [d.product, d.achieved, d.target, d.target>0?pctStr(d.pct):"—"], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots: d.target>0?{3:col}:null});
+  });
+  p.setY(p.getY()+10);
+
+  p.sectionTitle("Laporan Dana Tahunan — DPK (Tabungan+Giro+Deposito), per Bulan");
+  const fundCols = [{label:"BULAN",w:75},{label:"REALISASI",w:100,align:"right"},{label:"REALISASI+POTENSI",w:100,align:"right"},{label:"TARGET",w:80,align:"right"},{label:"KOMITMEN",w:80,align:"right"}];
+  p.tableHeader(fundCols);
+  fundStats.forEach((d,i)=>{
+    const monthName = MONTH_NAMES[parseInt(d.month.split("-")[1],10)-1];
+    p.tableRow(fundCols, [monthName, fmtNumId(d.realisasi), fmtNumId(d.combined), fmtNumId(d.target), fmtNumId(d.komitmenVal)], {zebra:i%2===0});
+  });
+  p.setY(p.getY()+10);
+
+  p.sectionTitle("Layanan & Support Tahunan — 15 Teratas");
+  const layCols = [{label:"#",w:32},{label:"NAMA",w:200},{label:"RATA² NASABAH",w:90,align:"right"},{label:"RATA² ANTRIAN",w:85,align:"right"},{label:"RATA² TRANSAKSI",w:88,align:"right"}];
+  p.tableHeader(layCols);
+  if(!layananStats.length){ p.paragraph(`Belum ada data Layanan di tahun ${year}.`, {size:9, color:[130,130,130]}); }
+  layananStats.slice(0,15).forEach((e,i)=>{
+    p.tableRow(layCols, [`${i+1}`, e.name, e.nasabah.toFixed(1), e.antrian.toFixed(1), e.transaksi.toFixed(1)], {zebra:i%2===0});
+  });
+  p.setY(p.getY()+10);
+
+  p.sectionTitle("Rata-rata Penilaian Support — 15 Teratas");
+  const penCols = [{label:"#",w:32},{label:"NAMA",w:220},{label:"RATA² SKOR",w:90,align:"right"},{label:"JUMLAH PENILAIAN",w:100,align:"right"}];
+  p.tableHeader(penCols);
+  if(!penilaianStats.length){ p.paragraph(`Belum ada data Penilaian di tahun ${year}.`, {size:9, color:[130,130,130]}); }
+  penilaianStats.slice(0,15).forEach((e,i)=>{
+    const col = e.avg>=85?PDF_GREEN:e.avg>=70?PDF_AMBER:PDF_RED;
+    p.tableRow(penCols, [`${i+1}`, e.name, e.avg.toFixed(1), e.count], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,col,PDF_BLACK], dots:{2:col}});
+  });
+
+  p.finish(`Detail_MainDashboard_${year}.pdf`);
+  toast("PDF Main Dashboard berhasil diunduh", "📄");
 }
 
 function pdfDashboardDetail(){
@@ -6047,18 +6506,18 @@ function sanitizeNIP(raw){
    termasuk kemungkinan yang belum ketahuan), proses dianggap gagal dan
    layar login dikembalikan ke kondisi bisa dipakai lagi, dengan pesan
    error yang jelas — BUKAN dibiarkan diam membisu tanpa batas waktu. */
-async function doLoginFlowWithFailsafe(nip){
+async function doLoginFlowWithFailsafe(nip, recordActivityNip){
   let timeoutId;
   const failsafe = new Promise((_, reject)=>{
     timeoutId = setTimeout(()=> reject(new Error("Proses login melebihi 25 detik — server tidak merespons. Coba lagi.")), 25000);
   });
   try{
-    await Promise.race([doLoginFlow(nip), failsafe]);
+    await Promise.race([doLoginFlow(nip, recordActivityNip), failsafe]);
   } finally {
     clearTimeout(timeoutId);
   }
 }
-async function doLoginFlow(nip){
+async function doLoginFlow(nip, recordActivityNip){
   nip = sanitizeNIP(nip);
   state.nip = nip;
   state.tab = "dashboard"; // selalu mulai dari dashboard, jangan bawa tab lama dari sesi sebelumnya
@@ -6087,6 +6546,14 @@ async function doLoginFlow(nip){
     mMonth, `${mMonth}::c0`,
     KEY_MARKETING_LEGACY, `${KEY_MARKETING_LEGACY}::c0`,
   ]);
+  // PERCEPAT: catat aktivitas login SETELAH batch di atas (bukan sebelum
+  // doLoginFlow dipanggil seperti sebelumnya) — supaya proses ini ikut
+  // memakai cache batch yang baru saja diisi (config sudah ada di cache),
+  // bukan melakukan pengambilan config-nya sendiri secara terpisah yang
+  // sia-sia (2 permintaan jaringan tambahan per login, tidak memakai cache
+  // sama sekali karena berjalan sebelum cache-nya siap). Tetap tidak
+  // di-"await" -- ini cuma pembukuan, tidak boleh menahan proses utama.
+  if(recordActivityNip) recordLoginActivity(recordActivityNip);
   // Jaring pengaman: kalau memuat data macet (mis. koneksi lambat / backend
   // Apps Script tidak merespons), tetap masuk ke dashboard setelah 8 detik
   // alih-alih membuat pengguna terjebak selamanya di layar login.
@@ -6227,15 +6694,12 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
       const hash = await sha256Hex(pw);
       const auth = (CFG.userAuth||{})[loginPendingNip];
       if(!auth || hash !== auth.passwordHash){ toast("Password salah, coba lagi", "⚠️"); return; }
-      // PENTING (kecepatan login): JANGAN "await" di sini — mencatat aktivitas
-      // login itu cuma pembukuan, bukan sesuatu yang harus selesai dulu sebelum
-      // pengguna masuk ke dashboard. Kalau di-await, itu jadi satu ROUND-TRIP
-      // JARINGAN PENUH (ambil+simpan config) yang WAJIB selesai duluan sebelum
-      // proses login utama (yang sudah dioptimalkan jadi 1 permintaan gabungan)
-      // bahkan MULAI — inilah penyebab jeda tambahan yang terasa setelah
-      // memasukkan password. Sekarang berjalan di latar belakang saja.
-      recordLoginActivity(loginPendingNip);
-      await doLoginFlowWithFailsafe(loginPendingNip);
+      // PENTING (kecepatan login): pencatatan aktivitas login sekarang
+      // dipanggil DARI DALAM doLoginFlow (setelah batch fetch selesai),
+      // supaya proses itu ikut memakai cache yang sama alih-alih mengambil
+      // config-nya sendiri secara terpisah (2 permintaan jaringan sia-sia).
+      // Tetap tidak menahan proses login utama.
+      await doLoginFlowWithFailsafe(loginPendingNip, loginPendingNip);
       resetLoginStage();
       return;
     }

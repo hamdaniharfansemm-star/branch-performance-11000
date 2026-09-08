@@ -4722,6 +4722,17 @@ async function fetchReportsInRange(dari, sampai){
     const next = m===12 ? `${y+1}-01` : `${y}-${String(m+1).padStart(2,"0")}`;
     cur = next;
   }
+  // PERCEPAT: ambil SEMUA bulan yang dibutuhkan dalam SATU permintaan
+  // gabungan dulu (sama seperti optimasi login/Main Dashboard) — sebelumnya
+  // setiap bulan diambil satu-satu berurutan, jadi rentang tanggal yang
+  // mencakup beberapa bulan terasa lambat (jeda) karena menunggu tiap bulan
+  // selesai baru lanjut ke bulan berikutnya.
+  const monthsToFetch = months.filter(mo=>mo!==state.month); // bulan aktif sudah ada di memori, tidak perlu diambil lagi
+  if(monthsToFetch.length){
+    const keysToFetch = [];
+    monthsToFetch.forEach(mo=>{ const k = keyReports(mo); keysToFetch.push(k, `${k}::c0`); });
+    await preloginBatchFetch(keysToFetch);
+  }
   let all = [];
   for(const mo of months){
     if(mo === state.month){
@@ -4735,6 +4746,7 @@ async function fetchReportsInRange(dari, sampai){
       window.__storageErrors.push(String(e && e.message||e));
     }
   }
+  __loginPrefetchCache = null; // cache sekali pakai, kosongkan lagi
   return all.filter(r => r.date >= dari && r.date <= sampai);
 }
 
@@ -4865,13 +4877,13 @@ async function downloadDailyRangePDF(){
     const notAcquired = scopeEmployees.filter(e=>!acquiredNames.has(e.name));
     const rangeLabel = f.dari===f.sampai ? f.dari : `${f.dari} s/d ${f.sampai}`;
 
-    const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Tarikan Harian ${rangeLabel}`);
+    const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) -  Tarikan Harian ${rangeLabel}`);
     p.newPage(`Tarikan Laporan Harian`);
-    p.paragraph(`Rentang: ${rangeLabel}${f.produk?' · Produk: '+f.produk:''}${f.karyawan?' · Karyawan: '+f.karyawan:''}`, {bold:true});
-    p.paragraph(`Total laporan: ${filtered.length} · Karyawan akuisisi: ${acquiredNames.size} dari ${scopeEmployees.length} · Belum akuisisi: ${notAcquired.length}`, {size:9.5});
+    p.paragraph(`Rentang: ${rangeLabel}${f.produk?' - Produk: '+f.produk:''}${f.karyawan?' - Karyawan: '+f.karyawan:''}`, {bold:true});
+    p.paragraph(`Total laporan: ${filtered.length} - Karyawan akuisisi: ${acquiredNames.size} dari ${scopeEmployees.length} - Belum akuisisi: ${notAcquired.length}`, {size:9.5});
     p.setY(p.getY()+8);
 
-    p.sectionTitle("📆 Ringkasan per Tanggal — Siapa Akuisisi Apa");
+    p.sectionTitle("Ringkasan per Tanggal -  Siapa Akuisisi Apa");
     const byDate = {};
     filtered.forEach(r=>{ if(!byDate[r.date]) byDate[r.date]=[]; byDate[r.date].push(r); });
     const dateKeys = Object.keys(byDate).sort();
@@ -4882,7 +4894,7 @@ async function downloadDailyRangePDF(){
     dateKeys.forEach(dt=>{
       const rows = byDate[dt];
       const totalUnit = rows.reduce((s,r)=>s+Number(r.amount||0),0);
-      p.paragraph(`🗓️ ${dt} — ${rows.length} laporan, ${totalUnit} unit`, {bold:true, size:9.5});
+      p.paragraph(`${dt} -  ${rows.length} laporan, ${totalUnit} unit`, {bold:true, size:9.5});
       p.tableHeader(dayCols);
       rows.forEach((r,i)=>{
         const emp = empByName(r.employee);
@@ -4894,7 +4906,7 @@ async function downloadDailyRangePDF(){
     });
     p.setY(p.getY()+6);
 
-    p.sectionTitle("📋 Detail Akuisisi — Tabel Lengkap");
+    p.sectionTitle("Detail Akuisisi -  Tabel Lengkap");
     const cols = [{label:"TGL",w:60},{label:"NAMA",w:140},{label:"TIM",w:90},{label:"PRODUK",w:80},{label:"JML",w:45,align:"right"},{label:"STATUS",w:60}];
     p.tableHeader(cols);
     if(!filtered.length){
@@ -4908,7 +4920,7 @@ async function downloadDailyRangePDF(){
     });
     p.setY(p.getY()+10);
 
-    p.sectionTitle(`🔻 Belum Ada Laporan dalam Rentang Ini (${notAcquired.length} karyawan)`);
+    p.sectionTitle(`Belum Ada Laporan dalam Rentang Ini (${notAcquired.length} karyawan)`);
     if(!notAcquired.length){
       p.paragraph("Semua karyawan pada cakupan ini sudah melapor.", {size:9.5, color:[40,140,90]});
     } else {
@@ -6117,12 +6129,12 @@ async function pdfMainDashboardDetail(){
   const layananStats = aggregateAnnualLayananStats(yearly);
   const penilaianStats = aggregateAnnualPenilaianStats(yearly);
 
-  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Main Dashboard — ${year}`);
-  p.newPage(`Main Dashboard — Kinerja Tahunan ${year}`);
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) -  Main Dashboard -  ${year}`);
+  p.newPage(`Main Dashboard -  Kinerja Tahunan ${year}`);
   p.paragraph(`Rangkuman seluruh 12 bulan tahun ${year}.`, {bold:true});
   p.setY(p.getY()+8);
 
-  p.sectionTitle("Kinerja Karyawan Tahunan per Produk — 15 Teratas");
+  p.sectionTitle("Kinerja Karyawan Tahunan per Produk -  15 Teratas");
   const empCols = [{label:"#",w:32},{label:"NAMA",w:170},{label:"TIM",w:110},{label:"TOTAL UNIT",w:75,align:"right"},{label:"TARGET TAHUNAN",w:80,align:"right"},{label:"CAPAIAN",w:48,align:"right"}];
   p.tableHeader(empCols);
   empStats.slice(0,15).forEach((e,i)=>{
@@ -6131,16 +6143,16 @@ async function pdfMainDashboardDetail(){
   });
   p.setY(p.getY()+10);
 
-  p.sectionTitle("Akuisisi Produk terhadap Target — Tahunan");
+  p.sectionTitle("Akuisisi Produk terhadap Target -  Tahunan");
   const prodCols = [{label:"PRODUK",w:130},{label:"UNIT TERCAPAI",w:100,align:"right"},{label:"TARGET TAHUNAN",w:100,align:"right"},{label:"CAPAIAN",w:80,align:"right"}];
   p.tableHeader(prodCols);
   prodStats.forEach((d,i)=>{
     const col = d.target>0 ? pdfAchievementColor(d.pct*100) : PDF_BLACK;
-    p.tableRow(prodCols, [d.product, d.achieved, d.target, d.target>0?pctStr(d.pct):"—"], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots: d.target>0?{3:col}:null});
+    p.tableRow(prodCols, [d.product, d.achieved, d.target, d.target>0?pctStr(d.pct):"-"], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots: d.target>0?{3:col}:null});
   });
   p.setY(p.getY()+10);
 
-  p.sectionTitle("Laporan Dana Tahunan — DPK (Tabungan+Giro+Deposito), per Bulan");
+  p.sectionTitle("Laporan Dana Tahunan -  DPK (Tabungan+Giro+Deposito), per Bulan");
   const fundCols = [{label:"BULAN",w:75},{label:"REALISASI",w:100,align:"right"},{label:"REALISASI+POTENSI",w:100,align:"right"},{label:"TARGET",w:80,align:"right"},{label:"KOMITMEN",w:80,align:"right"}];
   p.tableHeader(fundCols);
   fundStats.forEach((d,i)=>{
@@ -6149,8 +6161,8 @@ async function pdfMainDashboardDetail(){
   });
   p.setY(p.getY()+10);
 
-  p.sectionTitle("Layanan & Support Tahunan — 15 Teratas");
-  const layCols = [{label:"#",w:32},{label:"NAMA",w:200},{label:"RATA² NASABAH",w:90,align:"right"},{label:"RATA² ANTRIAN",w:85,align:"right"},{label:"RATA² TRANSAKSI",w:88,align:"right"}];
+  p.sectionTitle("Layanan & Support Tahunan -  15 Teratas");
+  const layCols = [{label:"#",w:32},{label:"NAMA",w:200},{label:"RATA-RATA NASABAH",w:90,align:"right"},{label:"RATA-RATA ANTRIAN",w:85,align:"right"},{label:"RATA-RATA TRANSAKSI",w:88,align:"right"}];
   p.tableHeader(layCols);
   if(!layananStats.length){ p.paragraph(`Belum ada data Layanan di tahun ${year}.`, {size:9, color:[130,130,130]}); }
   layananStats.slice(0,15).forEach((e,i)=>{
@@ -6158,8 +6170,8 @@ async function pdfMainDashboardDetail(){
   });
   p.setY(p.getY()+10);
 
-  p.sectionTitle("Rata-rata Penilaian Support — 15 Teratas");
-  const penCols = [{label:"#",w:32},{label:"NAMA",w:220},{label:"RATA² SKOR",w:90,align:"right"},{label:"JUMLAH PENILAIAN",w:100,align:"right"}];
+  p.sectionTitle("Rata-rata Penilaian Support -  15 Teratas");
+  const penCols = [{label:"#",w:32},{label:"NAMA",w:220},{label:"RATA-RATA SKOR",w:90,align:"right"},{label:"JUMLAH PENILAIAN",w:100,align:"right"}];
   p.tableHeader(penCols);
   if(!penilaianStats.length){ p.paragraph(`Belum ada data Penilaian di tahun ${year}.`, {size:9, color:[130,130,130]}); }
   penilaianStats.slice(0,15).forEach((e,i)=>{
@@ -6174,17 +6186,17 @@ async function pdfMainDashboardDetail(){
 function pdfDashboardDetail(){
   const stats = allEmployeeStats();
   const branchAvg = stats.length ? stats.reduce((s,e)=>s+e.overall,0)/stats.length : 0;
-  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Dashboard — ${monthLabel()}`);
-  p.newPage(`Detail Dashboard — ${monthLabel()}`);
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) -  Dashboard -  ${monthLabel()}`);
+  p.newPage(`Detail Dashboard -  ${monthLabel()}`);
   const top = stats[0];
   const pendingCount = state.reports.filter(r=>r.status==='pending').length;
-  p.paragraph(`Posisi tertinggi saat ini: ${top ? top.name+" — "+top.team+" ("+pctStr(top.overall)+")" : "Belum ada capaian"}`, {bold:true});
+  p.paragraph(`Posisi tertinggi saat ini: ${top ? top.name+" -  "+top.team+" ("+pctStr(top.overall)+")" : "Belum ada capaian"}`, {bold:true});
   p.paragraph(`Rata-rata pencapaian cabang: ${pctStr(branchAvg)}`, {bold:true});
   p.paragraph(`Karyawan capai/lampaui target: ${stats.filter(s=>s.overall>=1).length} dari ${stats.length}   |   Menunggu approval: ${pendingCount}`);
   p.setY(p.getY()+6);
 
   p.sectionTitle("Pencapaian per Tim");
-  const teamCols = [{label:"TIM",w:180},{label:"JML KARYAWAN",w:110,align:"right"},{label:"RATA² CAPAIAN",w:105,align:"right"},{label:"STATUS",w:95}];
+  const teamCols = [{label:"TIM",w:180},{label:"JML KARYAWAN",w:110,align:"right"},{label:"RATA-RATA CAPAIAN",w:105,align:"right"},{label:"STATUS",w:95}];
   p.tableHeader(teamCols);
   CFG.teams.forEach((team,i)=>{
     const avg = teamAverage(team);
@@ -6194,7 +6206,7 @@ function pdfDashboardDetail(){
   });
   p.setY(p.getY()+10);
 
-  p.sectionTitle("Juara per Tim — peraih capaian tertinggi di masing-masing tim");
+  p.sectionTitle("Juara per Tim -  peraih capaian tertinggi di masing-masing tim");
   const champCols = [{label:"TIM",w:170},{label:"JUARA",w:220},{label:"CAPAIAN",w:80,align:"right"}];
   p.tableHeader(champCols);
   CFG.teams.forEach((team,i)=>{
@@ -6206,7 +6218,7 @@ function pdfDashboardDetail(){
   });
   p.setY(p.getY()+10);
 
-  p.sectionTitle("Top 10 Karyawan — Semua Tim");
+  p.sectionTitle("Top 10 Karyawan -  Semua Tim");
   const topCols = [{label:"#",w:40},{label:"NAMA",w:220},{label:"TIM",w:150},{label:"CAPAIAN",w:80,align:"right"}];
   p.tableHeader(topCols);
   stats.slice(0,10).forEach((s,i)=>{ const col=pdfAchievementColor(s.overall*100); p.tableRow(topCols, [`${i+1}`, s.name, s.team, pctStr(s.overall)], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK, col], dots:{3:col}}); });
@@ -6228,8 +6240,8 @@ function pdfDashboardDetail(){
 
 function pdfLaporDetail(){
   const marked = state._dupMarked || markDuplicates(state.reports);
-  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Lapor Akuisisi — ${monthLabel()}`);
-  p.newPage(`Detail Laporan Akuisisi — ${monthLabel()}`);
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) -  Lapor Akuisisi -  ${monthLabel()}`);
+  p.newPage(`Detail Laporan Akuisisi -  ${monthLabel()}`);
   const approved = marked.filter(r=>r.status==='approved').length;
   const pending = marked.filter(r=>r.status==='pending').length;
   const rejected = marked.filter(r=>r.status==='rejected').length;
@@ -6249,10 +6261,10 @@ function pdfLeaderboardDetail(){
   const activeChip = document.querySelector("#lbChips .chip.active");
   const scope = activeChip ? activeChip.dataset.scope : "all";
   const list = scope==="all" ? allEmployeeStats() : teamStats(scope);
-  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Leaderboard — ${monthLabel()}`);
-  p.newPage(`Leaderboard Akuisisi — ${scope==="all"?"Semua Karyawan":scope} — ${monthLabel()}`);
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) -  Leaderboard -  ${monthLabel()}`);
+  p.newPage(`Leaderboard Akuisisi -  ${scope==="all"?"Semua Karyawan":scope} -  ${monthLabel()}`);
   p.sectionTitle("Peringkat per Tim");
-  const teamCols = [{label:"#",w:32},{label:"TIM",w:180},{label:"JML KARYAWAN",w:105,align:"right"},{label:"RATA² CAPAIAN",w:100,align:"right"},{label:"STATUS",w:75}];
+  const teamCols = [{label:"#",w:32},{label:"TIM",w:180},{label:"JML KARYAWAN",w:105,align:"right"},{label:"RATA-RATA CAPAIAN",w:100,align:"right"},{label:"STATUS",w:75}];
   p.tableHeader(teamCols);
   const teamsToShow = scope==="all" ? CFG.teams : [scope];
   const teamRanked = teamsToShow.map(t=>({team:t, avg:teamAverage(t), cnt:CFG.employees.filter(e=>e.team===t).length})).sort((a,b)=>b.avg-a.avg);
@@ -6261,7 +6273,7 @@ function pdfLeaderboardDetail(){
     p.tableRow(teamCols, [`${i+1}`, t.team, t.cnt, pctStr(t.avg), statusFor(t.avg).label], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col,col], dots:{3:col}});
   });
   p.setY(p.getY()+10);
-  p.sectionTitle(`Peringkat per Karyawan — ${scope==="all"?"Semua Tim":scope}`);
+  p.sectionTitle(`Peringkat per Karyawan -  ${scope==="all"?"Semua Tim":scope}`);
   const cols = [{label:"#",w:32},{label:"NAMA",w:195},{label:"TIM",w:130},{label:"CAPAIAN",w:75,align:"right"},{label:"STATUS",w:65}];
   p.tableHeader(cols);
   list.forEach((s,i)=>{
@@ -6270,7 +6282,7 @@ function pdfLeaderboardDetail(){
   });
   p.setY(p.getY()+10);
 
-  p.sectionTitle(`Detail Akuisisi per Produk — per Karyawan (${scope==="all"?"Semua Tim":scope})`);
+  p.sectionTitle(`Detail Akuisisi per Produk -  per Karyawan (${scope==="all"?"Semua Tim":scope})`);
   p.paragraph("Hanya menampilkan produk yang punya target atau sudah ada laporan.", {size:8, color:[130,130,130]});
   p.setY(p.getY()+4);
   const detCols = [{label:"NAMA",w:130},{label:"PRODUK",w:95},{label:"UNIT",w:75,align:"right"},{label:"TARGET",w:70,align:"right"},{label:"CAPAIAN",w:70,align:"right"}];
@@ -6288,7 +6300,7 @@ function pdfLeaderboardDetail(){
       anyDetailRow = true;
       const pct = target>0 ? unit/target*100 : 0;
       const col = target>0 ? pdfAchievementColor(pct) : PDF_BLACK;
-      p.tableRow(detCols, [firstRowForEmp?s.name:"", prod, unit, target, target>0?pct.toFixed(0)+"%":"—"],
+      p.tableRow(detCols, [firstRowForEmp?s.name:"", prod, unit, target, target>0?pct.toFixed(0)+"%":"-"],
         {zebra: (pi%2===0), colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots: target>0 ? {4:col} : null});
       firstRowForEmp = false;
     });
@@ -6300,25 +6312,25 @@ function pdfLeaderboardDetail(){
 }
 
 function pdfLayananDetail(){
-  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Layanan & Support — ${monthLabel()}`);
-  p.newPage(`Detail Layanan Nasabah & Support — ${monthLabel()}`);
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) -  Layanan & Support -  ${monthLabel()}`);
+  p.newPage(`Detail Layanan Nasabah & Support -  ${monthLabel()}`);
 
   const csRows = LAYANAN_EMPLOYEES.CS.map(n=>({n,a:layananAvg(n)})).filter(r=>r.a).sort((a,b)=>b.a.nasabah-a.a.nasabah);
   const tellerRows = LAYANAN_EMPLOYEES.TELLER.map(n=>({n,a:layananAvg(n)})).filter(r=>r.a).sort((a,b)=>b.a.nasabah-a.a.nasabah);
   const penRows = SUPPORT_TARGETS.map(s=>({n:s.name,kat:s.kategori,a:penilaianAvg(s.name)})).filter(r=>r.a).sort((a,b)=>b.a.avg-a.a.avg);
   const bestCS = csRows[0], bestTeller = tellerRows[0], bestSupport = penRows[0];
 
-  p.sectionTitle("Ikhtisar — Peraih Terbaik Bulan Ini");
+  p.sectionTitle("Ikhtisar -  Peraih Terbaik Bulan Ini");
   const ikhtisarCols = [{label:"KATEGORI",w:150},{label:"NAMA TERBAIK",w:200},{label:"PENCAPAIAN",w:110,align:"right"}];
   p.tableHeader(ikhtisarCols);
-  p.tableRow(ikhtisarCols, ["CS Terbaik", bestCS?bestCS.n:"—", bestCS?bestCS.a.nasabah.toFixed(1)+" nasabah/hari":"-"], {zebra:true, dots:{0:bestCS?PDF_GREEN:[180,180,180]}});
-  p.tableRow(ikhtisarCols, ["Teller Terbaik", bestTeller?bestTeller.n:"—", bestTeller?bestTeller.a.nasabah.toFixed(1)+" nasabah/hari":"-"], {zebra:false, dots:{0:bestTeller?PDF_GREEN:[180,180,180]}});
-  p.tableRow(ikhtisarCols, ["Support Terbaik", bestSupport?bestSupport.n:"—", bestSupport?bestSupport.a.avg.toFixed(0)+"/100":"-"], {zebra:true, dots:{0:bestSupport?PDF_GREEN:[180,180,180]}});
+  p.tableRow(ikhtisarCols, ["CS Terbaik", bestCS?bestCS.n:"-", bestCS?bestCS.a.nasabah.toFixed(1)+" nasabah/hari":"-"], {zebra:true, dots:{0:bestCS?PDF_GREEN:[180,180,180]}});
+  p.tableRow(ikhtisarCols, ["Teller Terbaik", bestTeller?bestTeller.n:"-", bestTeller?bestTeller.a.nasabah.toFixed(1)+" nasabah/hari":"-"], {zebra:false, dots:{0:bestTeller?PDF_GREEN:[180,180,180]}});
+  p.tableRow(ikhtisarCols, ["Support Terbaik", bestSupport?bestSupport.n:"-", bestSupport?bestSupport.a.avg.toFixed(0)+"/100":"-"], {zebra:true, dots:{0:bestSupport?PDF_GREEN:[180,180,180]}});
   p.setY(p.getY()+10);
 
   function drawLayananTable(title, rows){
     p.sectionTitle(title);
-    const lCols = [{label:"NAMA",w:150},{label:"HARI LAPOR",w:65,align:"right"},{label:"RATA² NASABAH",w:95,align:"right"},{label:"RATA² ANTRIAN",w:90,align:"right"},{label:"RATA² TRANSAKSI",w:95,align:"right"}];
+    const lCols = [{label:"NAMA",w:150},{label:"HARI LAPOR",w:65,align:"right"},{label:"RATA-RATA NASABAH",w:95,align:"right"},{label:"RATA-RATA ANTRIAN",w:90,align:"right"},{label:"RATA-RATA TRANSAKSI",w:95,align:"right"}];
     p.tableHeader(lCols);
     if(!rows.length){ p.paragraph("Belum ada input layanan bulan ini.", {size:9, color:[130,130,130]}); return; }
     const avgAntrian = rows.reduce((s,r)=>s+r.a.antrian,0)/rows.length;
@@ -6337,7 +6349,7 @@ function pdfLayananDetail(){
   drawLayananTable("Layanan Nasabah CS — Rata-rata Bulanan", csRows);
   drawLayananTable("Layanan Nasabah Teller — Rata-rata Bulanan", tellerRows);
 
-  p.sectionTitle("Detail Input Layanan — Semua Entri Harian");
+  p.sectionTitle("Detail Input Layanan -  Semua Entri Harian");
   const dCols = [{label:"TGL",w:60},{label:"NAMA",w:125},{label:"NASABAH",w:80,align:"right"},{label:"ANTRIAN",w:80,align:"right"},{label:"TRANSAKSI",w:80,align:"right"}];
   p.tableHeader(dCols);
   if(!state.layanan.length){ p.paragraph("Belum ada input layanan bulan ini.", {size:9, color:[130,130,130]}); }
@@ -6346,8 +6358,8 @@ function pdfLayananDetail(){
   });
   p.setY(p.getY()+10);
 
-  p.sectionTitle("Support — Rata-rata Penilaian Kinerja");
-  const pCols = [{label:"NAMA",w:170},{label:"KATEGORI",w:150},{label:"JML PENILAIAN",w:90,align:"right"},{label:"RATA² SKOR",w:70,align:"right"}];
+  p.sectionTitle("Support -  Rata-rata Penilaian Kinerja");
+  const pCols = [{label:"NAMA",w:170},{label:"KATEGORI",w:150},{label:"JML PENILAIAN",w:90,align:"right"},{label:"RATA-RATA SKOR",w:70,align:"right"}];
   p.tableHeader(pCols);
   if(!penRows.length){ p.paragraph("Belum ada penilaian bulan ini.", {size:9, color:[130,130,130]}); }
   penRows.forEach((r,i)=>{
@@ -6356,7 +6368,7 @@ function pdfLayananDetail(){
   });
   p.setY(p.getY()+10);
 
-  p.sectionTitle("Detail Laporan Penilaian — Semua Entri");
+  p.sectionTitle("Detail Laporan Penilaian -  Semua Entri");
   const penDetailCols = [{label:"TGL",w:60},{label:"DINILAI",w:100},{label:"KATEGORI",w:145},{label:"SKOR",w:40,align:"right"},{label:"PELAPOR",w:100}];
   p.tableHeader(penDetailCols);
   if(!state.penilaian.length){ p.paragraph("Belum ada penilaian bulan ini.", {size:9, color:[130,130,130]}); }
@@ -6368,7 +6380,7 @@ function pdfLayananDetail(){
 }
 
 function pdfLeadsDetail(){
-  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Leads`);
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) -  Leads`);
   p.newPage("Detail Leads & Follow Up");
   const followed = state.leads.filter(l=>l.followedBy).length;
   p.paragraph(`Total Leads: ${state.leads.length}   |   Sudah ditindaklanjuti: ${followed}   |   Belum: ${state.leads.length-followed}`, {bold:true});
@@ -6386,13 +6398,13 @@ function pdfLeadsDetail(){
 
 function pdfMarketingDetail(){
   const all = state.marketing;
-  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Marketing`);
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) -  Marketing`);
   p.newPage("Detail Laporan Marketing");
   const cnt = (h)=> all.filter(m=>m.hasil===h).length;
   p.paragraph(`Total Kunjungan: ${all.length}   |   FU: ${cnt("FU")}   |   Deal: ${cnt("Deal")}   |   Reject: ${cnt("Reject")}`, {bold:true});
   p.setY(p.getY()+8);
 
-  p.sectionTitle("Ringkasan per PIC — Tingkat Keberhasilan");
+  p.sectionTitle("Ringkasan per PIC -  Tingkat Keberhasilan");
   const picCols = [{label:"PIC",w:150},{label:"KUNJUNGAN",w:80,align:"right"},{label:"FU",w:55,align:"right"},{label:"DEAL",w:55,align:"right"},{label:"REJECT",w:55,align:"right"},{label:"CONVERSION",w:90,align:"right"}];
   p.tableHeader(picCols);
   const picNames = [...new Set(all.map(m=>m.pic))].sort();
@@ -6415,14 +6427,14 @@ function pdfMarketingDetail(){
   [...all].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).forEach((m,i)=>{
     const detail = m.hasil==="FU" ? (m.tanggalFU||"-") : "—";
     const color = m.hasil==="Deal" ? PDF_GREEN : m.hasil==="Reject" ? PDF_RED : PDF_BLACK;
-    p.tableRow(cols, [m.createdAt?new Date(m.createdAt).toLocaleDateString('id-ID'):"-", m.pic, m.kol, m.usaha||"—", m.hasil, detail, m.keterangan||""], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,color,PDF_BLACK,PDF_BLACK], dots:{4:color}});
+    p.tableRow(cols, [m.createdAt?new Date(m.createdAt).toLocaleDateString('id-ID'):"-", m.pic, m.kol, m.usaha||"-", m.hasil, detail, m.keterangan||""], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,color,PDF_BLACK,PDF_BLACK], dots:{4:color}});
   });
   p.finish(`Detail_Marketing_${new Date().toISOString().slice(0,10)}.pdf`);
   toast("PDF detail Marketing berhasil diunduh", "📄");
 }
 
 function pdfInfoDetail(){
-  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Informasi`);
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) -  Informasi`);
   p.newPage("Detail Informasi & Pengumuman");
   const list = [...state.info].sort((a,b)=>(b.postedAt||0)-(a.postedAt||0));
   if(!list.length){ p.paragraph("Belum ada informasi yang dipublikasikan."); }
@@ -6439,8 +6451,8 @@ function pdfInfoDetail(){
 
 function pdfRiwayatDetail(){
   const marked = state._dupMarked || markDuplicates(state.reports);
-  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Riwayat & Laporan — ${monthLabel()}`);
-  p.newPage(`Riwayat & Laporan — ${monthLabel()}`);
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) -  Riwayat & Laporan -  ${monthLabel()}`);
+  p.newPage(`Riwayat & Laporan -  ${monthLabel()}`);
   p.paragraph(`Total Laporan Akuisisi: ${state.reports.length}  |  Total Input Layanan: ${state.layanan.length}  |  Total Penilaian: ${state.penilaian.length}`, {bold:true});
   p.setY(p.getY()+8);
   p.sectionTitle("Semua Laporan Akuisisi");
@@ -6458,15 +6470,15 @@ function pdfRiwayatDetail(){
 function pdfAdminDetail(){
   const marked = state._dupMarked || markDuplicates(state.reports);
   const pending = marked.filter(r=>r.status==="pending");
-  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Admin — ${monthLabel()}`);
-  p.newPage(`Ringkasan Admin — ${monthLabel()}`);
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) -  Admin -  ${monthLabel()}`);
+  p.newPage(`Ringkasan Admin -  ${monthLabel()}`);
   p.paragraph(`Menunggu persetujuan: ${pending.length} laporan   |   Total NIP Admin aktif: ${CFG.adminNips.length}   |   Total akun terdaftar: ${Object.keys(CFG.userAuth||{}).length}`, {bold:true});
   p.setY(p.getY()+8);
 
   p.sectionTitle("Laporan Menunggu Persetujuan");
   const cols = [{label:"TGL",w:60},{label:"NAMA",w:148},{label:"PRODUK",w:98},{label:"JML",w:37,align:"right"},{label:"KET",w:145}];
   p.tableHeader(cols);
-  if(!pending.length){ p.paragraph("Tidak ada laporan yang menunggu — semua sudah diproses.", {indent:4}); }
+  if(!pending.length){ p.paragraph("Tidak ada laporan yang menunggu -  semua sudah diproses.", {indent:4}); }
   pending.forEach((r,i)=> p.tableRow(cols, [r.date, r.employee, r.product, r.amount, (r.note||"")], {zebra:i%2===0}));
   p.setY(p.getY()+10);
 
@@ -6493,7 +6505,7 @@ function pdfAdminDetail(){
 function pdfPipelineDetail(){
   const f = currentPipelineFilters ? currentPipelineFilters() : {};
   const filtered = applyPipelineFilters ? applyPipelineFilters(state.pipeline, f) : state.pipeline;
-  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Pipeline Dana`);
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) -  Pipeline Dana`);
   p.newPage("Detail Pipeline Dana");
   p.paragraph(`Total Pipeline: ${fmtJuta(pipelineTotalPipeline(filtered))}   |   Total Potensi: ${fmtJuta(pipelineTotalPotensi(filtered))}   |   ${filtered.length} entri`, {bold:true});
   p.setY(p.getY()+8);
@@ -6505,7 +6517,7 @@ function pdfPipelineDetail(){
   function mkMainCols(baseLabel){ return [{label:"JENIS",w:105},{label:"POTENSI",w:80,align:"right"},{label:"PIPELINE",w:80,align:"right"},{label:"REALISASI",w:80,align:"right"},{label:baseLabel,w:75,align:"right"},{label:"GAP",w:75,align:"right"}]; }
   function drawScheme(title, subtitle, schemeKey, baseField, baseLabel, usesPotensi){
     p.sectionTitle(title);
-    p.paragraph(`${subtitle} — semua nilai dalam juta rupiah.`, {size:8, color:[130,130,130]});
+    p.paragraph(`${subtitle} -  semua nilai dalam juta rupiah.`, {size:8, color:[130,130,130]});
     const mainCols = mkMainCols(baseLabel);
     p.tableHeader(mainCols);
     groups.forEach(([label, jenisList], i)=>{
@@ -6538,7 +6550,7 @@ function pdfPipelineDetail(){
   const entryCols = [{label:"PIC",w:104},{label:"NASABAH",w:122},{label:"NO. REK",w:65},{label:"NOMINAL (JUTA)",w:39,align:"right"},{label:"SUMBER",w:69},{label:"TGL",w:52},{label:"STATUS",w:56}];
   PIPELINE_JENIS.forEach(jenis=>{
     const rows = filtered.filter(e=>e.jenis===jenis).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
-    p.sectionTitle(`Daftar Entri Pipeline — ${jenis} (${rows.length} entri)`);
+    p.sectionTitle(`Daftar Entri Pipeline -  ${jenis} (${rows.length} entri)`);
     if(!rows.length){ p.paragraph(`Belum ada entri ${jenis} sesuai filter aktif.`, {size:9, color:[130,130,130]}); p.setY(p.getY()+8); return; }
     p.tableHeader(entryCols);
     rows.forEach((e,i)=>{
@@ -6671,7 +6683,7 @@ async function downloadSummaryPDF(){
     y += 8;
 
     sectionTitle("Pencapaian per Tim");
-    const teamCols = [{label:"TIM",w:170},{label:"JML KARYAWAN",w:100,align:"right"},{label:"RATA² CAPAIAN",w:110,align:"right"},{label:"STATUS",w:100}];
+    const teamCols = [{label:"TIM",w:170},{label:"JML KARYAWAN",w:100,align:"right"},{label:"RATA-RATA CAPAIAN",w:110,align:"right"},{label:"STATUS",w:100}];
     tableHeader(teamCols);
     CFG.teams.forEach((team,i)=>{
       const avg = teamAverage(team);
@@ -6690,7 +6702,7 @@ async function downloadSummaryPDF(){
 
     // ===== HALAMAN: AKUISISI PER PRODUK (CABANG) =====
     // ===== HALAMAN: PIPELINE DANA (Tabungan, Giro, Deposito, CASA, DPK) =====
-    newPage("Pipeline Dana — Tabungan, Giro, Deposito, CASA & DPK");
+    newPage("Pipeline Dana - Tabungan, Giro, Deposito, CASA & DPK");
     const plGroups = [
       ["Tabungan", ["Tabungan"]], ["Giro", ["Giro"]], ["Deposito", ["Deposito"]],
       ["CASA", ["Tabungan","Giro"]], ["DPK", ["Tabungan","Giro","Deposito"]],
@@ -6736,7 +6748,7 @@ async function downloadSummaryPDF(){
     const plEntryCols = [{label:"PIC",w:104},{label:"NASABAH",w:122},{label:"NO. REK",w:65},{label:"NOMINAL (JUTA)",w:39,align:"right"},{label:"SUMBER",w:69},{label:"TGL",w:52},{label:"STATUS",w:56}];
     PIPELINE_JENIS.forEach(jenis=>{
       const rows = state.pipeline.filter(e=>e.jenis===jenis).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
-      sectionTitle(`Daftar Entri Pipeline — ${jenis} (${rows.length} entri)`);
+      sectionTitle(`Daftar Entri Pipeline -  ${jenis} (${rows.length} entri)`);
       if(!rows.length){
         doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(120,120,120);
         doc.text(`Belum ada entri ${jenis}.`, MARGIN, y); y+=14;
@@ -6788,7 +6800,7 @@ async function downloadSummaryPDF(){
     });
 
     // ===== HALAMAN: RINCIAN GAP — KARYAWAN BELUM MENCAPAI TARGET =====
-    newPage("Karyawan Belum Mencapai Target — Rincian Gap per Produk");
+    newPage("Karyawan Belum Mencapai Target - Rincian Gap per Produk");
     doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(90,90,90);
     {
       const introLines = doc.splitTextToSize(`${belowTarget.length} dari ${stats.length} karyawan masih di bawah 100% pencapaian. Rincian produk yang masih kurang untuk masing-masing karyawan:`, PAGE_W-2*MARGIN);
@@ -6816,11 +6828,11 @@ async function downloadSummaryPDF(){
 
     // ===== HALAMAN: LAYANAN NASABAH & SUPPORT =====
     newPage("Layanan Nasabah & Support");
-    sectionTitle("Layanan Nasabah — Rata-rata Bulanan (CS & Teller)");
+    sectionTitle("Layanan Nasabah -  Rata-rata Bulanan (CS & Teller)");
     const layananNames = [...LAYANAN_EMPLOYEES.CS, ...LAYANAN_EMPLOYEES.TELLER];
     const layananRows = layananNames.map(n=>({n,a:layananAvg(n)})).filter(r=>r.a).sort((a,b)=>b.a.nasabah-a.a.nasabah);
     if(layananRows.length){
-      const lCols = [{label:"NAMA",w:190},{label:"HARI LAPOR",w:80,align:"right"},{label:"RATA² NASABAH",w:100,align:"right"},{label:"RATA² ANTRIAN",w:100,align:"right"}];
+      const lCols = [{label:"NAMA",w:190},{label:"HARI LAPOR",w:80,align:"right"},{label:"RATA-RATA NASABAH",w:100,align:"right"},{label:"RATA-RATA ANTRIAN",w:100,align:"right"}];
       tableHeader(lCols);
       layananRows.forEach((r,i)=> tableRow(lCols, [r.n, r.a.count, r.a.nasabah.toFixed(1), r.a.antrian.toFixed(1)+" mnt"], {zebra:i%2===0}));
     } else {
@@ -6829,10 +6841,10 @@ async function downloadSummaryPDF(){
     }
     y += 12;
 
-    sectionTitle("Support — Rata-rata Penilaian Kinerja");
+    sectionTitle("Support -  Rata-rata Penilaian Kinerja");
     const penilaianRows = SUPPORT_TARGETS.map(s=>({n:s.name, kat:s.kategori, a:penilaianAvg(s.name)})).filter(r=>r.a).sort((a,b)=>b.a.avg-a.a.avg);
     if(penilaianRows.length){
-      const pCols = [{label:"NAMA",w:170},{label:"KATEGORI",w:180},{label:"JML PENILAIAN",w:90,align:"right"},{label:"RATA² SKOR",w:70,align:"right"}];
+      const pCols = [{label:"NAMA",w:170},{label:"KATEGORI",w:180},{label:"JML PENILAIAN",w:90,align:"right"},{label:"RATA-RATA SKOR",w:70,align:"right"}];
       tableHeader(pCols);
       penilaianRows.forEach((r,i)=> tableRow(pCols, [r.n, r.kat, r.a.count, r.a.avg.toFixed(0)+"/100"], {zebra:i%2===0}));
     } else {

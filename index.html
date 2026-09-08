@@ -947,6 +947,7 @@ function defaultConfig(){
     leaderboardSectionOrder: ["chips","list"],
     layananSectionOrder: ["layananInput","layananLB","efisiensi","layananDetail","penilaianInput","penilaianLB","penilaianDetail"],
     maindashSectionOrder: ["employees","products","fund","layanan"],
+    leadsPriorityProducts: [], // [{product, urgent}] -- produk yang diprioritaskan tampil di awal daftar Leads, urutan sesuai array ini
   };
 }
 let CFG = defaultConfig();
@@ -2327,12 +2328,12 @@ function drawMainDashboardContent(yearly, year, content){
     if(!wrap) return;
     const filtered = teamFilter ? empStats.filter(e=>e.team===teamFilter) : empStats;
     wrap.innerHTML = `<table class="data">
-      <thead><tr><th>#</th><th>Nama</th><th>Tim</th><th style="text-align:right">Total Unit</th><th style="text-align:right">Target Tahunan</th><th style="text-align:right">Capaian</th></tr></thead>
+      <thead><tr><th>#</th><th>Nama</th><th>Tim</th><th style="text-align:right">Total Account</th><th style="text-align:right">Target Tahunan</th><th style="text-align:right">Capaian</th></tr></thead>
       <tbody>
         ${filtered.length ? filtered.map((e,i)=>{
           const col = statusFor(e.pct).cls;
           const dot = col==="ok"?"🟢":col==="warn"?"🟡":"🔴";
-          return `<tr>
+          return `<tr class="clickable-row" data-md-emp="${e.name}" style="cursor:pointer" title="Klik untuk lihat detail per produk">
             <td>${i+1}</td><td>${e.name}</td><td>${e.team}</td>
             <td style="text-align:right">${e.totalAchieved}</td>
             <td style="text-align:right">${e.totalTarget}</td>
@@ -2341,12 +2342,52 @@ function drawMainDashboardContent(yearly, year, content){
         }).join("") : `<tr><td colspan="6" class="hint" style="text-align:center;padding:16px">Tidak ada karyawan di tim ini.</td></tr>`}
       </tbody>
     </table>`;
+    wrap.querySelectorAll("[data-md-emp]").forEach(row=>{
+      row.onclick = ()=> openMainDashEmployeeDetail(row.dataset.mdEmp, empStats, year);
+    });
   }
   const teamFilterEl = document.getElementById("mdTeamFilter");
   if(teamFilterEl){
     teamFilterEl.onchange = ()=> redrawEmployeeTable(teamFilterEl.value);
     redrawEmployeeTable("");
   }
+}
+
+/* Modal: rincian akuisisi 1 karyawan per PRODUK, sepanjang 1 tahun penuh —
+   muncul saat nama karyawan di tabel Main Dashboard diklik. */
+function openMainDashEmployeeDetail(name, empStats, year){
+  const root = document.getElementById("modalRoot");
+  const e = empStats.find(x=>x.name===name);
+  if(!e){ return; }
+  const rows = CFG.products.map(prod=>{
+    const achieved = e.achieved[prod] || 0;
+    const emp = CFG.employees.find(x=>x.name===name);
+    const target = (emp && emp.targets[prod]) ? emp.targets[prod]*12 : 0;
+    return {prod, achieved, target};
+  }).filter(r=>r.achieved>0 || r.target>0);
+  const rowsHtml = rows.map(r=>{
+    const pct = r.target>0 ? r.achieved/r.target : 0;
+    const col = r.target>0 ? statusFor(pct).cls : "";
+    return `<div class="det-row">
+      <div>${r.prod}</div>
+      <div style="text-align:right">${r.achieved}</div>
+      <div style="text-align:right">${r.target || "-"}</div>
+      <div>${r.target>0 ? `<span class="badge ${col}">${pctStr(pct)}</span>` : `<span class="hint">-</span>`}</div>
+    </div>`;
+  }).join("");
+  root.innerHTML = `
+    <div class="modal-backdrop" id="modalBackdrop">
+      <div class="modal-box">
+        <button class="modal-close" id="modalCloseBtn">✕</button>
+        <h3 class="sub" style="font-size:19px">${name}</h3>
+        <div class="lb-team" style="margin-bottom:14px">${e.team} · Akuisisi Produk Sepanjang ${year} · Total ${e.totalAchieved} account (${pctStr(e.pct)})</div>
+        <div class="det-row head"><div>Produk</div><div style="text-align:right">Account</div><div style="text-align:right">Target Tahunan</div><div>Capaian</div></div>
+        ${rowsHtml || `<div class="empty">Belum ada akuisisi produk apa pun di tahun ${year}.</div>`}
+      </div>
+    </div>
+  `;
+  document.getElementById("modalCloseBtn").onclick = closeModal;
+  document.getElementById("modalBackdrop").onclick = (ev)=>{ if(ev.target.id==="modalBackdrop") closeModal(); };
 }
 
 function drawAnnualProductChart(prodStats){
@@ -2376,7 +2417,7 @@ function drawAnnualProductChart(prodStats){
     labels += `<text x="${cx}" y="${H-padB+18}" text-anchor="middle" font-size="10" font-weight="700" fill="#dde5f2" transform="rotate(-18 ${cx} ${H-padB+18})">${d.product}</text>`;
   });
   box.innerHTML = `
-    <h3 class="sub">📊 Total Unit Tercapai vs Target Tahunan per Produk</h3>
+    <h3 class="sub">📊 Total Account Tercapai vs Target Tahunan per Produk</h3>
     <div style="display:flex;gap:14px;margin-bottom:8px;font-size:11px;color:var(--ink-400)">
       <span><span style="display:inline-block;width:10px;height:10px;background:#5aa8ff;border-radius:2px;margin-right:4px"></span>Tercapai</span>
       <span><span style="display:inline-block;width:10px;height:10px;background:rgba(244,201,93,0.5);border-radius:2px;margin-right:4px"></span>Target</span>
@@ -2388,36 +2429,59 @@ function drawAnnualProductChart(prodStats){
 function drawAnnualFundChart(fundStats){
   const box = document.getElementById("mdFundChart");
   if(!box) return;
-  const allVals = fundStats.flatMap(d=>[d.target, d.komitmenVal, d.realisasi, d.combined]);
+  const allVals = fundStats.flatMap(d=>[d.target, d.komitmenVal, d.realisasi, d.combined]).filter(v=>v>0);
   const maxV = Math.max(1, ...allVals);
   const W = box.clientWidth || 900, H = 320;
-  const padL=55, padB=45, padT=20, padR=20;
+  const padL=65, padB=45, padT=20, padR=20;
   const chW = W-padL-padR, chH = H-padT-padB;
   const stepX = chW/(fundStats.length-1 || 1);
   function pathFor(key, color){
+    // PENTING: nilai 0 berarti BELUM ADA DATA untuk bulan itu (Admin belum
+    // mengisi), BUKAN benar-benar tercapai nol — jadi titik & garis untuk
+    // bulan itu SENGAJA tidak digambar (bukan disambung seolah nilainya
+    // memang 0), supaya tidak menyesatkan seakan performanya turun ke nol.
     const pts = fundStats.map((d,i)=>{
+      const v = d[key];
+      if(!(v>0)) return null;
       const x = padL + stepX*i;
-      const y = padT + chH - (d[key]/maxV)*chH;
-      return {x,y,v:d[key]};
+      const y = padT + chH - (v/maxV)*chH;
+      return {x,y,v};
     });
-    const line = `<polyline points="${pts.map(p=>`${p.x},${p.y}`).join(" ")}" fill="none" stroke="${color}" stroke-width="2.5" style="filter:drop-shadow(0 0 5px ${color})"/>`;
-    // Titik bulat jelas di setiap bulan, supaya nilai per-bulan gampang
-    // dibaca satu per satu (bukan cuma garis tanpa penanda).
-    const dots = pts.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="${color}" stroke="var(--navy-900,#0b1e3a)" stroke-width="1.2"/>`).join("");
-    return line + dots;
+    // Pecah jadi beberapa segmen garis terpisah setiap kali ada bulan kosong (null).
+    let segments = [], current = [];
+    pts.forEach(p=>{
+      if(p===null){ if(current.length) segments.push(current); current = []; }
+      else current.push(p);
+    });
+    if(current.length) segments.push(current);
+    let out = "";
+    segments.forEach(seg=>{
+      if(seg.length>1){
+        out += `<polyline points="${seg.map(p=>`${p.x},${p.y}`).join(" ")}" fill="none" stroke="${color}" stroke-width="2.5" style="filter:drop-shadow(0 0 5px ${color})"/>`;
+      }
+      seg.forEach(p=>{
+        out += `<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="${color}" stroke="var(--navy-900,#0b1e3a)" stroke-width="1.2"/>`;
+      });
+    });
+    return out;
   }
   let grid = "", labels = "";
-  [0, maxV*0.5, maxV].forEach(v=>{
+  // Lebih banyak garis bantu horizontal (bukan cuma 0/tengah/maks) supaya
+  // posisi angka di sumbu vertikal lebih jelas terbaca perbedaannya.
+  const steps = 5;
+  for(let i=0;i<=steps;i++){
+    const v = maxV*(i/steps);
     const y = padT+chH-(v/maxV)*chH;
     grid += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="rgba(255,255,255,0.1)"/>`;
     grid += `<text x="${padL-8}" y="${y+3}" text-anchor="end" font-size="9.5" fill="var(--ink-400)">${fmtNumId(Math.round(v))}</text>`;
-  });
+  }
   fundStats.forEach((d,i)=>{
     const x = padL + stepX*i;
     labels += `<text x="${x}" y="${H-padB+18}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#dde5f2">${MONTH_NAMES[parseInt(d.month.split("-")[1],10)-1].slice(0,3)}</text>`;
   });
   box.innerHTML = `
     <h3 class="sub">💹 Realisasi, Komitmen, Target &amp; Kecukupan Potensi Dana Masuk — Tren Bulanan</h3>
+    <p class="hint" style="margin:-6px 0 8px;font-size:10.5px">Bulan tanpa titik/garis berarti belum ada data yang diisi Admin untuk bulan itu.</p>
     <div style="display:flex;gap:14px;margin-bottom:8px;font-size:11px;color:var(--ink-400);flex-wrap:wrap">
       <span><span style="display:inline-block;width:10px;height:3px;background:#5aa8ff;margin-right:4px"></span>Realisasi</span>
       <span><span style="display:inline-block;width:10px;height:3px;background:#f4c95d;margin-right:4px"></span>Target</span>
@@ -2846,10 +2910,26 @@ function renderLapor(){
       </div>
       <div class="card glow">
         <h3 class="sub">Laporan Saya Bulan Ini</h3>
+        <div class="field" id="myReportsNameFieldWrap" style="margin:0 0 12px"><label>Nama Saya</label>
+          <select id="myReportsNameSelect"><option value="">-- Pilih nama Anda --</option>${CFG.employees.map(e=>`<option value="${e.name}">${e.name} (${e.team})</option>`).join("")}</select>
+        </div>
         <div id="myReports"></div>
       </div>
     </div>
   `;
+  const myNameSel = document.getElementById("myReportsNameSelect");
+  const savedName = (CFG.userAuth && CFG.userAuth[state.nip] && CFG.userAuth[state.nip].employeeName) || "";
+  if(savedName) myNameSel.value = savedName;
+  myNameSel.onchange = async ()=>{
+    renderMyReports();
+    // Simpan pilihan supaya tidak perlu pilih ulang tiap kali buka halaman ini.
+    const chosen = myNameSel.value;
+    await mutateConfigAndSave((cfg)=>{
+      if(!cfg.userAuth) cfg.userAuth = {};
+      if(!cfg.userAuth[state.nip]) return;
+      cfg.userAuth[state.nip].employeeName = chosen;
+    });
+  };
   document.getElementById("laporForm").onsubmit = async (e)=>{
     e.preventDefault();
     const submitBtn = e.target.querySelector("button[type=submit]");
@@ -2886,23 +2966,29 @@ function renderLapor(){
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 function renderMyReports(){
   const box = document.getElementById("myReports");
+  const nameSel = document.getElementById("myReportsNameSelect");
+  const myName = nameSel ? nameSel.value : "";
   const marked = state._dupMarked || markDuplicates(state.reports);
-  const rows = [...marked].sort((a,b)=>b.createdAt-a.createdAt).slice(0,30);
-  if(!rows.length){ box.innerHTML = `<div class="empty"><div class="e-ic">📭</div>Belum ada laporan.</div>`; return; }
+  const scoped = myName ? marked.filter(r=>r.employee===myName) : marked;
+  const rows = [...scoped].sort((a,b)=>b.createdAt-a.createdAt).slice(0,30);
+  if(!myName){ box.innerHTML = `<div class="empty"><div class="e-ic">👤</div>Pilih nama Anda di atas untuk melihat status laporan Anda sendiri.</div>`; return; }
+  if(!rows.length){ box.innerHTML = `<div class="empty"><div class="e-ic">📭</div>Belum ada laporan atas nama ${myName} bulan ini.</div>`; return; }
   box.innerHTML = `
     <div style="max-height:420px;overflow:auto">
     <table class="data">
-      <thead><tr><th>Tgl</th><th>Nama</th><th>Produk</th><th>Jml</th><th>Keterangan</th></tr></thead>
+      <thead><tr><th>Tgl</th><th>Produk</th><th>Jml</th><th>Keterangan</th><th>Status</th></tr></thead>
       <tbody>
-      ${rows.map(r=>`
-        <tr>
+      ${rows.map(r=>{
+        const col = r.isDuplicate ? "danger" : r.status==="approved" ? "ok" : r.status==="rejected" ? "danger" : "pending";
+        const label = r.isDuplicate ? "Duplikat" : r.status==="approved" ? "✅ Disetujui" : r.status==="rejected" ? "❌ Ditolak" : "⏳ Menunggu";
+        return `<tr>
           <td>${r.date}</td>
-          <td>${r.employee}</td>
           <td>${r.product}</td>
           <td><b>${r.amount}</b></td>
-          <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.note||'—'}</td>
-        </tr>
-      `).join("")}
+          <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.note||'-'}</td>
+          <td><span class="badge ${col}">${label}</span></td>
+        </tr>`;
+      }).join("")}
       </tbody>
     </table>
     </div>
@@ -3616,9 +3702,20 @@ function waLink(contact){
 function drawLeadsList(scope){
   const box = document.getElementById("leadsList");
   const isAdmin = state.role === "admin";
+  const priority = Array.isArray(CFG.leadsPriorityProducts) ? CFG.leadsPriorityProducts : [];
+  const priorityIndex = {}; priority.forEach((p,i)=>{ priorityIndex[p.product] = i; });
+  const urgentSet = new Set(priority.filter(p=>p.urgent).map(p=>p.product));
   const list = [...state.leads]
     .filter(l=> scope==="all" || l.product===scope)
-    .sort((a,b)=>(b.uploadedAt||0)-(a.uploadedAt||0));
+    .sort((a,b)=>{
+      // Produk prioritas tampil PALING ATAS, sesuai urutan yang diatur Admin;
+      // sisanya tetap terurut berdasarkan tanggal upload seperti biasa.
+      const pa = priorityIndex[a.product], pb = priorityIndex[b.product];
+      if(pa!==undefined && pb!==undefined) return pa-pb;
+      if(pa!==undefined) return -1;
+      if(pb!==undefined) return 1;
+      return (b.uploadedAt||0)-(a.uploadedAt||0);
+    });
   if(!list.length){ box.innerHTML = `<div class="empty"><div class="e-ic">🎯</div>Belum ada data leads.</div>`; return; }
   box.innerHTML = `<div style="max-height:520px;overflow:auto"><table class="data">
     <thead><tr><th>Produk</th><th>Nama Potensi</th><th>No HP / Rekening</th><th>Status Follow Up</th><th>Tanggal</th>${isAdmin?'<th></th>':''}</tr></thead>
@@ -3631,8 +3728,12 @@ function drawLeadsList(scope){
       const statusHtml = l.followedBy
         ? `<span class="badge ok" style="font-size:10.5px">✅ Done oleh ${l.followedBy}</span>`
         : (state.role!=="admin" ? `<button class="btn sm" data-followup="${l.id}">📞 Tandai Follow Up</button>` : `<span class="badge warn" style="font-size:10.5px">Belum di-follow up</span>`);
-      return `<tr>
-      <td><b>${l.product}</b></td><td>${l.name}</td><td>${contactHtml}</td>
+      const isUrgent = urgentSet.has(l.product);
+      const prodCell = isUrgent
+        ? `<b style="color:var(--danger)">🔥 ${l.product}</b>`
+        : (priorityIndex[l.product]!==undefined ? `<b style="color:var(--gold-300)">⭐ ${l.product}</b>` : `<b>${l.product}</b>`);
+      return `<tr${isUrgent?' style="background:rgba(220,80,80,0.08)"':''}>
+      <td>${prodCell}</td><td>${l.name}</td><td>${contactHtml}</td>
       <td>${statusHtml}</td>
       <td>${l.uploadedAt ? new Date(l.uploadedAt).toLocaleDateString('id-ID') : '-'}</td>
       ${isAdmin?`<td style="white-space:nowrap"><button class="btn ghost sm" data-ld-edit="${l.id}">✏️</button> <button class="btn danger sm" data-ld-del="${l.id}">🗑️</button></td>`:''}
@@ -4811,7 +4912,7 @@ async function runDailyRangeReport(){
     <div style="margin-bottom:14px;padding:12px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px">
         <span style="font-weight:800;color:var(--gold-300);font-size:13px">📅 ${dayLabel}</span>
-        <span class="badge ok" style="font-size:10.5px">${rows.length} laporan · ${totalUnit} unit</span>
+        <span class="badge ok" style="font-size:10.5px">${rows.length} laporan - ${totalUnit} account</span>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         ${rows.map(r=>{
@@ -4823,7 +4924,7 @@ async function runDailyRangeReport(){
             <div style="width:34px;height:34px;border-radius:8px;background:${badge.bg};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;flex-shrink:0">${badge.ic}</div>
             <div style="flex:1;min-width:0">
               <div style="font-size:12.5px;font-weight:700;color:#eef2f7">${r.employee} <span style="color:var(--ink-400);font-weight:600">· ${emp?emp.team:'-'}</span></div>
-              <div style="font-size:11px;color:var(--ink-400)">${r.product} — ${r.amount} unit</div>
+              <div style="font-size:11px;color:var(--ink-400)">${r.product} - ${r.amount} account</div>
             </div>
             <span style="font-size:11px;font-weight:700;color:${statCol};white-space:nowrap">${statDot} ${r.status==="approved"?"Disetujui":"Menunggu"}</span>
           </div>`;
@@ -4903,7 +5004,7 @@ async function downloadDailyRangePDF(){
     dateKeys.forEach(dt=>{
       const rows = byDate[dt];
       const totalUnit = rows.reduce((s,r)=>s+Number(r.amount||0),0);
-      p.paragraph(`${dt} - ${rows.length} laporan, ${totalUnit} unit`, {bold:true, size:9.5});
+      p.paragraph(`${dt} - ${rows.length} laporan, ${totalUnit} account`, {bold:true, size:9.5});
       p.tableHeader(dayCols);
       rows.forEach((r,i)=>{
         const emp = empByName(r.employee);
@@ -4959,6 +5060,11 @@ function renderAdmin(){
   view.innerHTML = `
     <h2 class="sec">Admin &mdash; Approval &amp; Koreksi Laporan <span class="line"></span></h2>
     <p class="hint" style="margin-bottom:16px">Setiap laporan karyawan wajib <b>disetujui Admin</b> sebelum poinnya dihitung ke sistem &amp; leaderboard. Admin juga dapat mengubah atau menghapus laporan yang keliru.</p>
+
+    <h3 class="sub" style="margin-top:0">⏳ Menunggu Persetujuan (${pending.length})</h3>
+    <div class="card glow" style="margin-bottom:18px">
+      <div id="pendingList">${pending.length ? pending.map(r=>pendingRowHTML(r)).join("") : `<div class="empty"><div class="e-ic">🎉</div>Tidak ada laporan yang menunggu.</div>`}</div>
+    </div>
 
     <div class="card glow" style="margin-bottom:18px">
       <div class="orb o-gold"></div>
@@ -5089,6 +5195,13 @@ function renderAdmin(){
     </div>
 
     <div class="card glow" style="margin-bottom:18px">
+      <div class="orb o-gold"></div>
+      <h3 class="sub">🎯 Prioritas Produk di Leads</h3>
+      <p class="hint" style="margin-bottom:14px">Pilih produk yang perlu tampil PALING ATAS di daftar Leads (mis. produk yang sedang gencar dikejar). Tandai "Urgent" untuk memberi warna merah mencolok pada produk itu.</p>
+      <div id="leadsPriorityList"></div>
+    </div>
+
+    <div class="card glow" style="margin-bottom:18px">
       <div class="orb o-blue"></div>
       <h3 class="sub">🔍 Cek Data Tersimpan di Server</h3>
       <p class="hint" style="margin-bottom:14px">Lihat langsung semua data yang benar-benar tersimpan di Google Sheet Anda saat ini — berguna untuk memastikan tidak ada data yang hilang atau tersesat.</p>
@@ -5123,11 +5236,6 @@ function renderAdmin(){
       <button class="btn primary" id="exportBtn">⬇️ Unduh CSV — ${monthLabel()}</button>
     </div>
 
-    <h3 class="sub" style="margin-top:24px">Menunggu Persetujuan (${pending.length})</h3>
-    <div class="card glow">
-      <div id="pendingList">${pending.length ? pending.map(r=>pendingRowHTML(r)).join("") : `<div class="empty"><div class="e-ic">🎉</div>Tidak ada laporan yang menunggu.</div>`}</div>
-    </div>
-
     <h3 class="sub" style="margin-top:24px">Semua Laporan Akuisisi &mdash; ${monthLabel()} (${all.length})</h3>
     <div class="card glow">
       <div id="adminList" style="max-height:560px;overflow:auto"></div>
@@ -5147,6 +5255,7 @@ function renderAdmin(){
   document.getElementById("diagCheckBtn").onclick = checkStoredData;
   document.getElementById("repairMonthBtn").onclick = repairMisplacedMonthData;
   document.getElementById("testEmailBtn").onclick = testSendEmail;
+  drawLeadsPriorityList();
   document.getElementById("addAdminForm").onsubmit = async (e)=>{
     e.preventDefault();
     const raw = document.getElementById("newAdminNip").value;
@@ -5661,6 +5770,55 @@ const SECTION_ORDER_CFG_KEY = {
   layanan: "layananSectionOrder",
   maindash: "maindashSectionOrder",
 };
+function drawLeadsPriorityList(){
+  const box = document.getElementById("leadsPriorityList");
+  if(!box) return;
+  const priority = Array.isArray(CFG.leadsPriorityProducts) ? CFG.leadsPriorityProducts : [];
+  const priorityNames = priority.map(p=>p.product);
+  const remaining = CFG.products.filter(p=>!priorityNames.includes(p));
+  box.innerHTML = `
+    ${priority.length ? `<p class="hint" style="margin-bottom:8px;font-weight:700">Urutan prioritas (paling atas = paling diutamakan):</p>` : ""}
+    ${priority.map((p,i)=>`
+      <div class="lb-row" style="padding:9px 12px">
+        <div style="flex:1;font-weight:700">${i+1}. ${p.product} ${p.urgent?'<span class="badge danger" style="font-size:9px;margin-left:6px">🔥 URGENT</span>':''}</div>
+        <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-400);cursor:pointer">
+          <input type="checkbox" data-lp-urgent="${p.product}" ${p.urgent?'checked':''}> Urgent
+        </label>
+        <button class="btn ghost sm" data-lp-up="${p.product}" ${i===0?'disabled':''}>⬆️</button>
+        <button class="btn ghost sm" data-lp-down="${p.product}" ${i===priority.length-1?'disabled':''}>⬇️</button>
+        <button class="btn danger sm" data-lp-remove="${p.product}">✕</button>
+      </div>`).join("")}
+    ${remaining.length ? `<p class="hint" style="margin:14px 0 8px">Produk lain (klik + untuk jadikan prioritas):</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${remaining.map(p=>`<button class="chip" data-lp-add="${p}">+ ${p}</button>`).join("")}
+      </div>` : ""}
+    ${!priority.length && !remaining.length ? `<p class="hint">Belum ada produk terdaftar.</p>` : ""}
+  `;
+  async function saveList(newList){
+    const ok = await mutateConfigAndSave((cfg)=>{ cfg.leadsPriorityProducts = newList; });
+    if(!ok){ toast("Gagal menyimpan, coba lagi", "⚠️"); return; }
+    toast("Prioritas Leads diperbarui", "✅");
+    playSound("click");
+    if(state.tab === "admin") drawLeadsPriorityList();
+  }
+  box.querySelectorAll("[data-lp-add]").forEach(b=>b.onclick=()=>{
+    saveList([...priority, {product:b.dataset.lpAdd, urgent:false}]);
+  });
+  box.querySelectorAll("[data-lp-remove]").forEach(b=>b.onclick=()=>{
+    saveList(priority.filter(p=>p.product!==b.dataset.lpRemove));
+  });
+  box.querySelectorAll("[data-lp-urgent]").forEach(cb=>cb.onchange=()=>{
+    saveList(priority.map(p=>p.product===cb.dataset.lpUrgent ? {...p, urgent:cb.checked} : p));
+  });
+  box.querySelectorAll("[data-lp-up]").forEach(b=>b.onclick=()=>{
+    const cur = [...priority]; const idx = cur.findIndex(p=>p.product===b.dataset.lpUp);
+    if(idx>0){ [cur[idx],cur[idx-1]] = [cur[idx-1],cur[idx]]; saveList(cur); }
+  });
+  box.querySelectorAll("[data-lp-down]").forEach(b=>b.onclick=()=>{
+    const cur = [...priority]; const idx = cur.findIndex(p=>p.product===b.dataset.lpDown);
+    if(idx>=0 && idx<cur.length-1){ [cur[idx],cur[idx+1]] = [cur[idx+1],cur[idx]]; saveList(cur); }
+  });
+}
 function drawLayoutList(pageKey, boxId){
   const box = document.getElementById(boxId);
   if(!box) return;
@@ -6183,47 +6341,54 @@ async function pdfMainDashboardDetail(){
   const penilaianStats = aggregateAnnualPenilaianStats(yearly);
 
   const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) - Main Dashboard - ${year}`);
+
+  // Halaman 1: ringkasan + Kinerja Karyawan Tahunan
   p.newPage(`Main Dashboard - Kinerja Tahunan ${year}`);
   p.paragraph(`Rangkuman seluruh 12 bulan tahun ${year}.`, {bold:true});
   p.setY(p.getY()+8);
-
-  p.sectionTitle("Kinerja Karyawan Tahunan per Produk - 15 Teratas");
-  const empCols = [{label:"#",w:32},{label:"NAMA",w:170},{label:"TIM",w:110},{label:"TOTAL UNIT",w:75,align:"right"},{label:"TARGET TAHUNAN",w:80,align:"right"},{label:"CAPAIAN",w:48,align:"right"}];
+  p.sectionTitle("👤 Kinerja Karyawan Tahunan per Produk - 15 Teratas");
+  const empCols = [{label:"#",w:32},{label:"NAMA",w:170},{label:"TIM",w:110},{label:"TOTAL ACCOUNT",w:75,align:"right"},{label:"TARGET TAHUNAN",w:80,align:"right"},{label:"CAPAIAN",w:48,align:"right"}];
   p.tableHeader(empCols);
   empStats.slice(0,15).forEach((e,i)=>{
     const col = pdfAchievementColor(e.pct*100);
     p.tableRow(empCols, [`${i+1}`, e.name, e.team, e.totalAchieved, e.totalTarget, pctStr(e.pct)], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots:{5:col}});
   });
-  p.setY(p.getY()+10);
 
-  p.sectionTitle("Akuisisi Produk terhadap Target - Tahunan");
-  const prodCols = [{label:"PRODUK",w:130},{label:"UNIT TERCAPAI",w:100,align:"right"},{label:"TARGET TAHUNAN",w:100,align:"right"},{label:"CAPAIAN",w:80,align:"right"}];
+  // Halaman 2: Akuisisi Produk terhadap Target
+  p.newPage(`Akuisisi Produk terhadap Target - Tahunan ${year}`);
+  p.sectionTitle("📦 Akuisisi Produk terhadap Target - Tahunan");
+  const prodCols = [{label:"PRODUK",w:130},{label:"ACCOUNT TERCAPAI",w:100,align:"right"},{label:"TARGET TAHUNAN",w:100,align:"right"},{label:"CAPAIAN",w:80,align:"right"}];
   p.tableHeader(prodCols);
   prodStats.forEach((d,i)=>{
     const col = d.target>0 ? pdfAchievementColor(d.pct*100) : PDF_BLACK;
     p.tableRow(prodCols, [d.product, d.achieved, d.target, d.target>0?pctStr(d.pct):"-"], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots: d.target>0?{3:col}:null});
   });
-  p.setY(p.getY()+10);
 
-  p.sectionTitle("Laporan Dana Tahunan - DPK (Tabungan+Giro+Deposito), per Bulan");
+  // Halaman 3: Laporan Dana Tahunan
+  p.newPage(`Laporan Dana Tahunan ${year}`);
+  p.sectionTitle("💰 Laporan Dana Tahunan - DPK (Tabungan+Giro+Deposito), per Bulan");
   const fundCols = [{label:"BULAN",w:75},{label:"REALISASI",w:100,align:"right"},{label:"REALISASI+POTENSI",w:100,align:"right"},{label:"TARGET",w:80,align:"right"},{label:"KOMITMEN",w:80,align:"right"}];
   p.tableHeader(fundCols);
   fundStats.forEach((d,i)=>{
     const monthName = MONTH_NAMES[parseInt(d.month.split("-")[1],10)-1];
-    p.tableRow(fundCols, [monthName, fmtNumId(d.realisasi), fmtNumId(d.combined), fmtNumId(d.target), fmtNumId(d.komitmenVal)], {zebra:i%2===0});
+    const noData = d.realisasi<=0 && d.target<=0 && d.komitmenVal<=0;
+    p.tableRow(fundCols, [monthName, noData?"-":fmtNumId(d.realisasi), noData?"-":fmtNumId(d.combined), noData?"-":fmtNumId(d.target), noData?"-":fmtNumId(d.komitmenVal)], {zebra:i%2===0, colors: noData ? [PDF_BLACK,[170,170,170],[170,170,170],[170,170,170],[170,170,170]] : null});
   });
-  p.setY(p.getY()+10);
+  p.setY(p.getY()+8);
+  p.paragraph("Bulan bertanda \"-\" berarti belum ada data yang diisi Admin untuk bulan itu.", {size:8.5, color:[130,130,130]});
 
-  p.sectionTitle("Layanan & Support Tahunan - 15 Teratas");
+  // Halaman 4: Layanan & Support Tahunan
+  p.newPage(`Layanan & Support Tahunan ${year}`);
+  p.sectionTitle("🎧 Rata-rata Layanan Nasabah (CS & Teller) - 15 Teratas");
   const layCols = [{label:"#",w:32},{label:"NAMA",w:200},{label:"RATA-RATA NASABAH",w:90,align:"right"},{label:"RATA-RATA ANTRIAN",w:85,align:"right"},{label:"RATA-RATA TRANSAKSI",w:88,align:"right"}];
   p.tableHeader(layCols);
   if(!layananStats.length){ p.paragraph(`Belum ada data Layanan di tahun ${year}.`, {size:9, color:[130,130,130]}); }
   layananStats.slice(0,15).forEach((e,i)=>{
     p.tableRow(layCols, [`${i+1}`, e.name, e.nasabah.toFixed(1), e.antrian.toFixed(1), e.transaksi.toFixed(1)], {zebra:i%2===0});
   });
-  p.setY(p.getY()+10);
+  p.setY(p.getY()+14);
 
-  p.sectionTitle("Rata-rata Penilaian Support - 15 Teratas");
+  p.sectionTitle("🥇 Rata-rata Penilaian Support - 15 Teratas");
   const penCols = [{label:"#",w:32},{label:"NAMA",w:220},{label:"RATA-RATA SKOR",w:90,align:"right"},{label:"JUMLAH PENILAIAN",w:100,align:"right"}];
   p.tableHeader(penCols);
   if(!penilaianStats.length){ p.paragraph(`Belum ada data Penilaian di tahun ${year}.`, {size:9, color:[130,130,130]}); }

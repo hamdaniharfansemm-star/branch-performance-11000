@@ -4668,6 +4668,23 @@ function renderRiwayat(){
       <div class="card kpi glow"><div class="orb o-blue"></div><div class="lbl">Total Input Layanan</div><div class="val">${state.layanan.length}</div><div class="sub">Bulan: ${monthLabel()}</div></div>
       <div class="card kpi glow"><div class="orb o-gold"></div><div class="lbl">Total Penilaian Rekan</div><div class="val">${state.penilaian.length}</div><div class="sub">Bulan: ${monthLabel()}</div></div>
     </div>
+
+    <h3 class="sub" style="margin-top:24px">🗓️ Tarikan Laporan Harian (Rentang Tanggal)</h3>
+    <div class="card glow" style="margin-bottom:24px">
+      <p class="hint" style="margin-bottom:14px">Lihat detail siapa mengakuisisi apa, kapan — bisa satu hari saja atau rentang tanggal. Cocok untuk pertanyaan seperti "siapa saja yang akuisisi produk CC hari ini?".</p>
+      <div class="grid cols-4" style="gap:12px;margin-bottom:14px">
+        <div class="field" style="margin:0"><label>Dari Tanggal</label><input type="date" id="dr_dari" value="${todayISO()}"></div>
+        <div class="field" style="margin:0"><label>Sampai Tanggal</label><input type="date" id="dr_sampai" value="${todayISO()}"></div>
+        <div class="field" style="margin:0"><label>Produk</label><select id="dr_produk"><option value="">Semua Produk</option>${CFG.products.map(p=>`<option value="${p}">${p}</option>`).join("")}</select></div>
+        <div class="field" style="margin:0"><label>Karyawan</label><select id="dr_karyawan"><option value="">Semua Karyawan</option>${CFG.employees.map(e=>`<option value="${e.name}">${e.name}</option>`).join("")}</select></div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+        <button class="btn primary sm" id="dr_tarikBtn">🔍 Tarik Laporan</button>
+        <button class="btn ghost sm" id="dr_pdfBtn">📄 Unduh PDF Detail</button>
+      </div>
+      <div id="dr_resultBox"><p class="hint" style="text-align:center;padding:16px">Pilih rentang tanggal &amp; filter di atas, lalu klik "Tarik Laporan".</p></div>
+    </div>
+
     <h3 class="sub" style="margin-top:24px">Semua Laporan Akuisisi — ${monthLabel()}</h3>
     <div class="card glow">
       <div style="max-height:480px;overflow:auto">
@@ -4687,6 +4704,227 @@ function renderRiwayat(){
       </div>
     </div>
   `;
+  document.getElementById("dr_tarikBtn").onclick = runDailyRangeReport;
+  document.getElementById("dr_pdfBtn").onclick = downloadDailyRangePDF;
+}
+
+/* Ambil semua Laporan Akuisisi dalam rentang [dari, sampai] — bisa lintas
+   bulan, jadi harus mengambil data SETIAP bulan yang tercakup rentang itu
+   (bukan cuma bulan yang sedang tampil di layar), lalu menyaring persis ke
+   tanggal-tanggal yang diminta. */
+async function fetchReportsInRange(dari, sampai){
+  const startMonth = dari.slice(0,7), endMonth = sampai.slice(0,7);
+  const months = [];
+  let cur = startMonth;
+  while(cur <= endMonth && months.length < 24){ // batas aman 24 bulan supaya tidak tak berujung kalau input salah
+    months.push(cur);
+    const [y,m] = cur.split("-").map(Number);
+    const next = m===12 ? `${y+1}-01` : `${y}-${String(m+1).padStart(2,"0")}`;
+    cur = next;
+  }
+  let all = [];
+  for(const mo of months){
+    if(mo === state.month){
+      all = all.concat(state.reports); // bulan yang sedang aktif, pakai yang sudah ada di memori (tidak perlu fetch ulang)
+      continue;
+    }
+    try{
+      const list = await loadList(keyReports(mo));
+      all = all.concat(list);
+    }catch(e){
+      window.__storageErrors.push(String(e && e.message||e));
+    }
+  }
+  return all.filter(r => r.date >= dari && r.date <= sampai);
+}
+
+function currentDailyRangeFilters(){
+  return {
+    dari: document.getElementById("dr_dari").value,
+    sampai: document.getElementById("dr_sampai").value,
+    produk: document.getElementById("dr_produk").value,
+    karyawan: document.getElementById("dr_karyawan").value,
+  };
+}
+
+async function runDailyRangeReport(){
+  const box = document.getElementById("dr_resultBox");
+  const btn = document.getElementById("dr_tarikBtn");
+  const f = currentDailyRangeFilters();
+  if(!f.dari || !f.sampai){ toast("Pilih tanggal dari & sampai", "⚠️"); return; }
+  if(f.dari > f.sampai){ toast("Tanggal 'Dari' tidak boleh setelah 'Sampai'", "⚠️"); return; }
+  btn.disabled = true; btn.textContent = "⏳ Menarik...";
+  box.innerHTML = `<p class="hint" style="text-align:center;padding:16px">Menarik data, mohon tunggu...</p>`;
+  let all;
+  try{
+    all = await fetchReportsInRange(f.dari, f.sampai);
+  }catch(e){
+    box.innerHTML = `<p class="hint" style="color:var(--danger)">Gagal menarik data: ${e.message||e}</p>`;
+    btn.disabled = false; btn.textContent = "🔍 Tarik Laporan";
+    return;
+  }
+  btn.disabled = false; btn.textContent = "🔍 Tarik Laporan";
+  let filtered = all.filter(r=>r.status!=="rejected");
+  if(f.produk) filtered = filtered.filter(r=>r.product===f.produk);
+  if(f.karyawan) filtered = filtered.filter(r=>r.employee===f.karyawan);
+  filtered.sort((a,b)=> a.date===b.date ? (a.employee<b.employee?-1:1) : (a.date<b.date?-1:1));
+
+  const scopeEmployees = f.karyawan ? CFG.employees.filter(e=>e.name===f.karyawan) : CFG.employees;
+  const acquiredNames = new Set(filtered.map(r=>r.employee));
+  const notAcquired = scopeEmployees.filter(e=>!acquiredNames.has(e.name));
+
+  const rangeLabel = f.dari===f.sampai ? f.dari : `${f.dari} s/d ${f.sampai}`;
+  // Kelompokkan per tanggal, supaya langsung kelihatan "hari ini siapa
+  // akuisisi produk apa saja" tanpa perlu menyisir tabel baris demi baris.
+  const byDate = {};
+  filtered.forEach(r=>{
+    if(!byDate[r.date]) byDate[r.date] = [];
+    byDate[r.date].push(r);
+  });
+  const dateKeys = Object.keys(byDate).sort((a,b)=> b<a?-1:1); // terbaru dulu
+  const groupedHTML = dateKeys.map(dt=>{
+    const rows = byDate[dt];
+    const totalUnit = rows.reduce((s,r)=>s+Number(r.amount||0),0);
+    const dayLabel = new Date(dt+"T00:00:00").toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+    return `
+    <div style="margin-bottom:14px;padding:12px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px">
+        <span style="font-weight:800;color:var(--gold-300);font-size:13px">📅 ${dayLabel}</span>
+        <span class="badge ok" style="font-size:10.5px">${rows.length} laporan · ${totalUnit} unit</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${rows.map(r=>{
+          const badge = productBadge(r.product);
+          const emp = empByName(r.employee);
+          const statCol = r.status==="approved" ? "var(--ok)" : "var(--gold-300)";
+          const statDot = r.status==="approved" ? "🟢" : "🟡";
+          return `<div style="display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:8px;background:rgba(255,255,255,0.02)">
+            <div style="width:34px;height:34px;border-radius:8px;background:${badge.bg};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;flex-shrink:0">${badge.ic}</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12.5px;font-weight:700;color:#eef2f7">${r.employee} <span style="color:var(--ink-400);font-weight:600">· ${emp?emp.team:'-'}</span></div>
+              <div style="font-size:11px;color:var(--ink-400)">${r.product} — ${r.amount} unit</div>
+            </div>
+            <span style="font-size:11px;font-weight:700;color:${statCol};white-space:nowrap">${statDot} ${r.status==="approved"?"Disetujui":"Menunggu"}</span>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`;
+  }).join("");
+  box.innerHTML = `
+    <div class="grid cols-3" style="gap:12px;margin-bottom:14px">
+      <div class="card kpi glow compact"><div class="lbl">Total Laporan</div><div class="val" style="font-size:20px">${filtered.length}</div><div class="sub">${rangeLabel}${f.produk?' · '+f.produk:''}${f.karyawan?' · '+f.karyawan:''}</div></div>
+      <div class="card kpi glow compact"><div class="lbl">Karyawan Akuisisi</div><div class="val" style="font-size:20px;color:var(--ok)">${acquiredNames.size}</div><div class="sub">dari ${scopeEmployees.length} karyawan tercakup</div></div>
+      <div class="card kpi glow compact"><div class="lbl">Belum Akuisisi</div><div class="val" style="font-size:20px;color:var(--danger)">${notAcquired.length}</div><div class="sub">dalam rentang ini</div></div>
+    </div>
+    <h4 style="font-size:13px;color:var(--ink-200);margin:0 0 10px">📆 Ringkasan per Tanggal — Siapa Akuisisi Apa</h4>
+    <div style="max-height:420px;overflow-y:auto;margin-bottom:18px">
+      ${groupedHTML || `<p class="hint" style="text-align:center;padding:16px">Tidak ada laporan yang cocok dengan filter ini.</p>`}
+    </div>
+    <h4 style="font-size:13px;color:var(--ink-200);margin:0 0 10px">📋 Tabel Lengkap</h4>
+    <div style="overflow-x:auto;max-height:420px;overflow-y:auto">
+      <table class="data">
+        <thead><tr><th>Tgl</th><th>Nama</th><th>Tim</th><th>Produk</th><th style="text-align:right">Jml</th><th>Status</th></tr></thead>
+        <tbody>
+          ${filtered.length ? filtered.map((r,i)=>{
+            const emp = empByName(r.employee);
+            const col = r.status==="approved"?"ok":"pending";
+            return `<tr>
+              <td>${r.date}</td><td>${r.employee}</td><td>${emp?emp.team:'-'}</td><td>${r.product}</td>
+              <td style="text-align:right"><b>${r.amount}</b></td>
+              <td><span class="badge ${col}">${r.status==="approved"?"Disetujui":"Menunggu"}</span></td>
+            </tr>`;
+          }).join("") : `<tr><td colspan="6" style="text-align:center;color:var(--ink-400);padding:20px">Tidak ada laporan yang cocok dengan filter ini.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+    ${notAcquired.length ? `
+    <div style="margin-top:16px;padding-top:14px;border-top:1px dashed rgba(255,255,255,0.12)">
+      <p style="font-size:12.5px;font-weight:700;color:var(--danger);margin-bottom:8px">🔻 Belum ada laporan dalam rentang ini (${notAcquired.length} karyawan):</p>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${notAcquired.map(e=>`<span class="badge danger" style="font-size:10.5px">${e.name} · ${e.team}</span>`).join("")}
+      </div>
+    </div>` : ""}
+  `;
+}
+
+async function downloadDailyRangePDF(){
+  const f = currentDailyRangeFilters();
+  if(!f.dari || !f.sampai){ toast("Pilih tanggal dari & sampai, lalu tarik laporan dulu", "⚠️"); return; }
+  if(f.dari > f.sampai){ toast("Tanggal 'Dari' tidak boleh setelah 'Sampai'", "⚠️"); return; }
+  try{
+    toast("Menyiapkan PDF...", "⏳");
+    await ensureJsPDF();
+    const all = await fetchReportsInRange(f.dari, f.sampai);
+    let filtered = all.filter(r=>r.status!=="rejected");
+    if(f.produk) filtered = filtered.filter(r=>r.product===f.produk);
+    if(f.karyawan) filtered = filtered.filter(r=>r.employee===f.karyawan);
+    filtered.sort((a,b)=> a.date===b.date ? (a.employee<b.employee?-1:1) : (a.date<b.date?-1:1));
+
+    const scopeEmployees = f.karyawan ? CFG.employees.filter(e=>e.name===f.karyawan) : CFG.employees;
+    const acquiredNames = new Set(filtered.map(r=>r.employee));
+    const notAcquired = scopeEmployees.filter(e=>!acquiredNames.has(e.name));
+    const rangeLabel = f.dari===f.sampai ? f.dari : `${f.dari} s/d ${f.sampai}`;
+
+    const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) — Tarikan Harian ${rangeLabel}`);
+    p.newPage(`Tarikan Laporan Harian`);
+    p.paragraph(`Rentang: ${rangeLabel}${f.produk?' · Produk: '+f.produk:''}${f.karyawan?' · Karyawan: '+f.karyawan:''}`, {bold:true});
+    p.paragraph(`Total laporan: ${filtered.length} · Karyawan akuisisi: ${acquiredNames.size} dari ${scopeEmployees.length} · Belum akuisisi: ${notAcquired.length}`, {size:9.5});
+    p.setY(p.getY()+8);
+
+    p.sectionTitle("📆 Ringkasan per Tanggal — Siapa Akuisisi Apa");
+    const byDate = {};
+    filtered.forEach(r=>{ if(!byDate[r.date]) byDate[r.date]=[]; byDate[r.date].push(r); });
+    const dateKeys = Object.keys(byDate).sort();
+    if(!dateKeys.length){
+      p.paragraph("Tidak ada laporan yang cocok dengan filter ini.", {size:9, color:[130,130,130]});
+    }
+    const dayCols = [{label:"NAMA",w:150},{label:"TIM",w:100},{label:"PRODUK",w:90},{label:"JML",w:45,align:"right"},{label:"STATUS",w:60}];
+    dateKeys.forEach(dt=>{
+      const rows = byDate[dt];
+      const totalUnit = rows.reduce((s,r)=>s+Number(r.amount||0),0);
+      p.paragraph(`🗓️ ${dt} — ${rows.length} laporan, ${totalUnit} unit`, {bold:true, size:9.5});
+      p.tableHeader(dayCols);
+      rows.forEach((r,i)=>{
+        const emp = empByName(r.employee);
+        const col = r.status==="approved" ? PDF_GREEN : PDF_AMBER;
+        p.tableRow(dayCols, [r.employee, emp?emp.team:'-', r.product, r.amount, r.status==="approved"?"Disetujui":"Menunggu"],
+          {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots:{4:col}});
+      });
+      p.setY(p.getY()+6);
+    });
+    p.setY(p.getY()+6);
+
+    p.sectionTitle("📋 Detail Akuisisi — Tabel Lengkap");
+    const cols = [{label:"TGL",w:60},{label:"NAMA",w:140},{label:"TIM",w:90},{label:"PRODUK",w:80},{label:"JML",w:45,align:"right"},{label:"STATUS",w:60}];
+    p.tableHeader(cols);
+    if(!filtered.length){
+      p.paragraph("Tidak ada laporan yang cocok dengan filter ini.", {size:9, color:[130,130,130]});
+    }
+    filtered.forEach((r,i)=>{
+      const emp = empByName(r.employee);
+      const col = r.status==="approved" ? PDF_GREEN : PDF_AMBER;
+      p.tableRow(cols, [r.date, r.employee, emp?emp.team:'-', r.product, r.amount, r.status==="approved"?"Disetujui":"Menunggu"],
+        {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots:{5:col}});
+    });
+    p.setY(p.getY()+10);
+
+    p.sectionTitle(`🔻 Belum Ada Laporan dalam Rentang Ini (${notAcquired.length} karyawan)`);
+    if(!notAcquired.length){
+      p.paragraph("Semua karyawan pada cakupan ini sudah melapor.", {size:9.5, color:[40,140,90]});
+    } else {
+      const naCols = [{label:"NAMA",w:220},{label:"TIM",w:150}];
+      p.tableHeader(naCols);
+      notAcquired.forEach((e,i)=>{
+        p.tableRow(naCols, [e.name, e.team], {zebra:i%2===0, colors:[PDF_RED,PDF_RED], dots:{0:PDF_RED}});
+      });
+    }
+
+    p.finish(`Tarikan_Harian_${f.dari}_${f.sampai}.pdf`);
+    toast("PDF Tarikan Harian berhasil diunduh", "📄");
+  }catch(err){
+    console.error(err);
+    toast("Gagal membuat PDF, coba lagi", "⚠️");
+  }
 }
 
 /* ---------------- ADMIN ---------------- */
@@ -5271,6 +5509,7 @@ async function repairMisplacedMonthData(){
   if(state.tab === "admin" && document.getElementById("adminList")){
     const allNow = [...(state._dupMarked||markDuplicates(state.reports))].sort((a,b)=>b.createdAt-a.createdAt);
     renderAdminList(allNow);
+    renderPendingList(allNow.filter(r=>r.status==="pending"));
   }
   toast(totalMoved>0 ? `${totalMoved} entri berhasil diperbaiki` : "Pemeriksaan selesai, tidak ada yang perlu diperbaiki", totalMoved>0?"🩹":"✅");
 }
@@ -5462,6 +5701,13 @@ function wireMasterDataForms(){
   };
 }
 
+function renderPendingList(pending){
+  const box = document.getElementById("pendingList");
+  if(!box) return;
+  box.innerHTML = pending.length ? pending.map(r=>pendingRowHTML(r)).join("") : `<div class="empty"><div class="e-ic">🎉</div>Tidak ada laporan yang menunggu.</div>`;
+  document.querySelectorAll("[data-approve]").forEach(b=>b.onclick=()=>decideReport(b.dataset.approve, "approved"));
+  document.querySelectorAll("[data-reject]").forEach(b=>b.onclick=()=>decideReport(b.dataset.reject, "rejected"));
+}
 function pendingRowHTML(r){
   return `
     <div class="lb-row" style="align-items:center">
@@ -5486,12 +5732,14 @@ async function decideReport(id, status){
   playFanfare(status==="approved" ? "success" : "reject");
   // PERCEPAT: dulu ini memanggil renderAdmin() penuh (menyusun ULANG SELURUH
   // halaman Admin — Kelola Karyawan, Produk, Tim, tata letak, akun pengguna,
-  // dst — padahal yang berubah cuma satu baris di daftar approval). Sekarang
-  // cukup gambar ulang daftar approval-nya saja, jauh lebih ringan & terasa
-  // seketika.
+  // dst — padahal yang berubah cuma satu baris). Sekarang cukup gambar ulang
+  // BAGIAN yang benar-benar berubah: daftar "Menunggu Persetujuan" (supaya
+  // tombol Setujui/Tolak yang barusan diklik BENAR-BENAR hilang dari
+  // layar) DAN daftar laporan lengkap.
   if(state.tab === "admin" && document.getElementById("adminList")){
     const allNow = [...(state._dupMarked||markDuplicates(state.reports))].sort((a,b)=>b.createdAt-a.createdAt);
     renderAdminList(allNow);
+    renderPendingList(allNow.filter(r=>r.status==="pending"));
   }
 }
 function renderAdminList(all){
@@ -5591,6 +5839,7 @@ function openEditReport(id){
     if(state.tab === "admin" && document.getElementById("adminList")){
       const allNow = [...(state._dupMarked||markDuplicates(state.reports))].sort((a,b)=>b.createdAt-a.createdAt);
       renderAdminList(allNow);
+      renderPendingList(allNow.filter(r=>r.status==="pending"));
     }
   };
 }
@@ -5607,6 +5856,7 @@ async function deleteReport(id){
   if(state.tab === "admin" && document.getElementById("adminList")){
     const allNow = [...(state._dupMarked||markDuplicates(state.reports))].sort((a,b)=>b.createdAt-a.createdAt);
     renderAdminList(allNow);
+    renderPendingList(allNow.filter(r=>r.status==="pending"));
   }
 }
 function exportReportsCSV(){

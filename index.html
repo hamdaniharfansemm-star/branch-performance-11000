@@ -3894,6 +3894,129 @@ function openEditLead(id, scope){
     drawLeadsList(scope);
   };
 }
+/* ---- Upload Bulk Data Akuisisi (khusus Admin) ---- */
+async function downloadBulkAcquisitionTemplate(){
+  try{
+    await ensureXLSX();
+    const sampleRows = [
+      {"Nama Karyawan": CFG.employees[0] ? CFG.employees[0].name : "Contoh Nama", "Produk": CFG.products[0] || "Contoh Produk", "Jumlah": 3, "Tanggal": "2026-01-15"},
+      {"Nama Karyawan": CFG.employees[0] ? CFG.employees[0].name : "Contoh Nama", "Produk": CFG.products[1] || "Contoh Produk 2", "Jumlah": 1, "Tanggal": "2026-01-20"},
+    ];
+    const ws = XLSX.utils.json_to_sheet(sampleRows);
+    ws["!cols"] = [{wch:28},{wch:16},{wch:10},{wch:14}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Data Akuisisi");
+    XLSX.writeFile(wb, "Template_Bulk_Akuisisi.xlsx");
+    toast("Template berhasil diunduh", "📋");
+  }catch(err){
+    console.error(err);
+    toast("Gagal membuat template, coba lagi", "⚠️");
+  }
+}
+async function handleBulkAcquisitionUpload(){
+  if(state.role !== "admin"){ toast("Fitur ini khusus Admin", "🔒"); return; }
+  const fileInput = document.getElementById("bulkAcqFile");
+  const btn = document.getElementById("bulkAcqUploadBtn");
+  const box = document.getElementById("bulkAcqResultBox");
+  const file = fileInput.files[0];
+  if(!file){ toast("Pilih file Excel/CSV terlebih dahulu", "⚠️"); return; }
+  btn.disabled = true; btn.textContent = "⏳ Memproses...";
+  box.innerHTML = `<p class="hint">Membaca file...</p>`;
+  try{
+    await ensureXLSX();
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:"array"});
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, {defval:"", raw:false});
+    if(!rows.length){ box.innerHTML = `<p class="hint" style="color:var(--danger)">File kosong / tidak terbaca.</p>`; btn.disabled=false; btn.textContent="📤 Upload & Proses"; return; }
+
+    const findKey = (row, candidates)=>{
+      const keys = Object.keys(row);
+      for(const c of candidates){
+        const hit = keys.find(k=>k.toLowerCase().replace(/[^a-z]/g,"").includes(c));
+        if(hit) return hit;
+      }
+      return null;
+    };
+    const empNames = new Set(CFG.employees.map(e=>e.name.toLowerCase().trim()));
+    const prodNames = new Set(CFG.products.map(p=>p.toLowerCase().trim()));
+    const empByLower = {}; CFG.employees.forEach(e=>{ empByLower[e.name.toLowerCase().trim()] = e.name; });
+    const prodByLower = {}; CFG.products.forEach(p=>{ prodByLower[p.toLowerCase().trim()] = p; });
+
+    const valid = [], errors = [];
+    rows.forEach((row, idx)=>{
+      const kName = findKey(row, ["namakaryawan","karyawan","nama"]);
+      const kProduk = findKey(row, ["produk"]);
+      const kJumlah = findKey(row, ["jumlah","amount","account"]);
+      const kTanggal = findKey(row, ["tanggal","tgl","date"]);
+      const rawName = kName ? String(row[kName]).trim() : "";
+      const rawProduk = kProduk ? String(row[kProduk]).trim() : "";
+      const rawJumlah = kJumlah ? String(row[kJumlah]).trim() : "";
+      const rawTanggal = kTanggal ? String(row[kTanggal]).trim() : "";
+      const rowNum = idx+2; // +2: baris 1 = header di Excel
+
+      if(!rawName && !rawProduk && !rawJumlah && !rawTanggal) return; // baris kosong, lewati diam-diam
+      const empMatch = empByLower[rawName.toLowerCase()];
+      if(!empMatch){ errors.push(`Baris ${rowNum}: nama karyawan "${rawName}" tidak ditemukan di daftar karyawan.`); return; }
+      const prodMatch = prodByLower[rawProduk.toLowerCase()];
+      if(!prodMatch){ errors.push(`Baris ${rowNum}: produk "${rawProduk}" tidak ditemukan di daftar produk.`); return; }
+      const amount = Number(rawJumlah);
+      if(!amount || amount<=0){ errors.push(`Baris ${rowNum}: jumlah "${rawJumlah}" bukan angka valid (harus lebih dari 0).`); return; }
+      const dateMatch = /^\d{4}-\d{2}-\d{2}$/.test(rawTanggal);
+      if(!dateMatch){ errors.push(`Baris ${rowNum}: tanggal "${rawTanggal}" harus format YYYY-MM-DD (mis. 2026-01-15).`); return; }
+
+      valid.push({employee: empMatch, product: prodMatch, amount, date: rawTanggal});
+    });
+
+    if(!valid.length){
+      box.innerHTML = `<p class="hint" style="color:var(--danger)">Tidak ada baris valid. ${errors.length} baris bermasalah:</p>
+        <ul style="margin:8px 0 0 18px;font-size:12px;color:var(--ink-200);max-height:200px;overflow:auto">${errors.slice(0,50).map(e=>`<li>${e}</li>`).join("")}</ul>`;
+      btn.disabled = false; btn.textContent = "📤 Upload & Proses";
+      return;
+    }
+
+    box.innerHTML = `<p class="hint">Menyimpan ${valid.length} baris ke server...</p>`;
+    // PENTING (kecepatan): kelompokkan per bulan dulu, lalu SATU kali
+    // ambil-ubah-simpan per bulan (bukan satu-satu per baris) — supaya
+    // upload ratusan baris tidak perlu ratusan putaran jaringan terpisah.
+    const byMonth = {};
+    valid.forEach(v=>{
+      const mo = v.date.slice(0,7);
+      if(!byMonth[mo]) byMonth[mo] = [];
+      byMonth[mo].push(v);
+    });
+    let savedCount = 0;
+    const failedMonths = [];
+    for(const mo of Object.keys(byMonth)){
+      const newEntries = byMonth[mo].map(v=>({
+        id: uid(), employee: v.employee, product: v.product, amount: v.amount, date: v.date,
+        note: "Diunggah massal oleh Admin", status: "approved", createdAt: Date.now(),
+      }));
+      const ok = await mutateAndSave(keyReports(mo), "reports", (fresh)=>{ newEntries.forEach(e=>fresh.push(e)); });
+      if(ok) savedCount += newEntries.length;
+      else failedMonths.push(monthLabelOf(mo));
+    }
+    rebuildIndex();
+    btn.disabled = false; btn.textContent = "📤 Upload & Proses";
+    fileInput.value = "";
+
+    let html = `<p style="font-weight:700;color:var(--ok);margin-bottom:8px">✅ ${savedCount} laporan berhasil disimpan &amp; langsung disetujui.</p>`;
+    if(failedMonths.length){
+      html += `<p style="font-weight:700;color:var(--danger);margin-bottom:6px">⚠️ Gagal menyimpan untuk bulan: ${failedMonths.join(", ")} — coba upload ulang baris untuk bulan itu.</p>`;
+    }
+    if(errors.length){
+      html += `<p style="font-weight:700;color:var(--warn,#c98a1f);margin:10px 0 6px">${errors.length} baris dilewati karena bermasalah:</p>
+        <ul style="margin:0 0 0 18px;font-size:12px;color:var(--ink-200);max-height:200px;overflow:auto">${errors.slice(0,50).map(e=>`<li>${e}</li>`).join("")}</ul>`;
+    }
+    box.innerHTML = html;
+    toast(`${savedCount} laporan berhasil diunggah`, "📤");
+    playSound("bell");
+  }catch(err){
+    console.error(err);
+    box.innerHTML = `<p class="hint" style="color:var(--danger)">Gagal memproses file: ${err.message||err}</p>`;
+    btn.disabled = false; btn.textContent = "📤 Upload & Proses";
+  }
+}
 async function handleLeadsUpload(){
   const fileInput = document.getElementById("leadsFile");
   const file = fileInput.files[0];
@@ -5282,6 +5405,21 @@ function renderAdmin(){
     </div>
 
     <div class="card glow" style="margin-bottom:18px">
+      <div class="orb o-gold"></div>
+      <h3 class="sub">📤 Upload Bulk Data Akuisisi (Excel)</h3>
+      <p class="hint" style="margin-bottom:14px">Untuk mengisi data lama yang belum sempat dilaporkan satu-satu (mis. seluruh Januari) — <b>khusus Admin</b>. Karyawan tetap input satu per satu seperti biasa lewat Lapor Akuisisi. Laporan hasil upload otomatis <b>langsung Disetujui</b> (tidak perlu approval lagi) dan masuk ke bulan yang benar sesuai tanggal di file — langsung muncul di grafik, Main Dashboard, dan Tarikan Harian.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn ghost sm" id="bulkAcqTemplateBtn">📋 Unduh Template Excel</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <input type="file" id="bulkAcqFile" accept=".xlsx,.xls,.csv" style="flex:1;min-width:200px;color:var(--ink-200)">
+        <button class="btn primary sm" id="bulkAcqUploadBtn">📤 Upload &amp; Proses</button>
+      </div>
+      <p class="hint" style="font-size:11px">Kolom wajib: <b>Nama Karyawan</b>, <b>Produk</b>, <b>Jumlah</b>, <b>Tanggal</b> (format YYYY-MM-DD, mis. 2026-01-15). Nama karyawan &amp; produk harus persis sama dengan yang terdaftar di sistem.</p>
+      <div id="bulkAcqResultBox" style="margin-top:14px"></div>
+    </div>
+
+    <div class="card glow" style="margin-bottom:18px">
       <div class="orb o-blue"></div>
       <h3 class="sub">🔍 Cek Data Tersimpan di Server</h3>
       <p class="hint" style="margin-bottom:14px">Lihat langsung semua data yang benar-benar tersimpan di Google Sheet Anda saat ini — berguna untuk memastikan tidak ada data yang hilang atau tersesat.</p>
@@ -5335,6 +5473,8 @@ function renderAdmin(){
   document.getElementById("diagCheckBtn").onclick = checkStoredData;
   document.getElementById("repairMonthBtn").onclick = repairMisplacedMonthData;
   document.getElementById("testEmailBtn").onclick = testSendEmail;
+  document.getElementById("bulkAcqTemplateBtn").onclick = downloadBulkAcquisitionTemplate;
+  document.getElementById("bulkAcqUploadBtn").onclick = handleBulkAcquisitionUpload;
   drawLeadsPriorityList();
   document.getElementById("addAdminForm").onsubmit = async (e)=>{
     e.preventDefault();

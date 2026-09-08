@@ -946,7 +946,7 @@ function defaultConfig(){
     pipelineSectionOrder: ["filter","kpi","jenis","target","lapor","list"],
     leaderboardSectionOrder: ["chips","list"],
     layananSectionOrder: ["layananInput","layananLB","efisiensi","layananDetail","penilaianInput","penilaianLB","penilaianDetail"],
-    maindashSectionOrder: ["employees","products","fund","layanan"],
+    maindashSectionOrder: ["employees","products","employeeTrend","fund","layanan"],
     leadsPriorityProducts: [], // [{product, urgent}] -- produk yang diprioritaskan tampil di awal daftar Leads, urutan sesuai array ini
   };
 }
@@ -2142,6 +2142,20 @@ function aggregateAnnualFundStats(yearly, jenisList){
     return {month: mo, target, komitmenVal, realisasi, combined: realisasi+potensi};
   });
 }
+/* Tren akuisisi bulanan untuk 1 karyawan (atau semua) & 1 produk (atau
+   semua) sepanjang tahun — dipakai untuk grafik "Tren Akuisisi Karyawan". */
+function aggregateEmployeeMonthlyTrend(yearly, employeeFilter, productFilter){
+  return yearly.months.map(mo=>{
+    let total = 0;
+    (yearly.reportsByMonth[mo]||[]).forEach(r=>{
+      if(r.status !== "approved") return;
+      if(employeeFilter && r.employee !== employeeFilter) return;
+      if(productFilter && r.product !== productFilter) return;
+      total += Number(r.amount||0);
+    });
+    return {month: mo, value: total};
+  });
+}
 function aggregateAnnualLayananStats(yearly){
   const perEmployee = {};
   yearly.months.forEach(mo=>{
@@ -2246,6 +2260,19 @@ function drawMainDashboardContent(yearly, year, content){
     products: `
       <h2 class="sec">📦 Akuisisi Produk terhadap Target — Tahunan (${year}) <span class="line"></span></h2>
       <div class="chart-card-light" id="mdProductChart" style="margin-bottom:18px"></div>`,
+    employeeTrend: `
+      <h2 class="sec">📈 Tren Akuisisi Karyawan per Bulan (${year}) <span class="line"></span></h2>
+      <div class="chart-card-light" style="margin-bottom:18px">
+        <div class="grid cols-2" style="gap:12px;margin-bottom:14px">
+          <div class="field" style="margin:0"><label>Karyawan</label>
+            <select id="mdTrendEmpFilter"><option value="">Semua Karyawan</option>${CFG.employees.map(e=>`<option value="${e.name}">${e.name} (${e.team})</option>`).join("")}</select>
+          </div>
+          <div class="field" style="margin:0"><label>Produk</label>
+            <select id="mdTrendProdFilter"><option value="">Semua Produk</option>${CFG.products.map(p=>`<option value="${p}">${p}</option>`).join("")}</select>
+          </div>
+        </div>
+        <div id="mdTrendChart"></div>
+      </div>`,
     fund: `
       <h2 class="sec">💰 Laporan Dana Tahunan (${year}) <span class="line"></span></h2>
       <div class="chart-card-light" style="margin-bottom:18px">
@@ -2321,6 +2348,21 @@ function drawMainDashboardContent(yearly, year, content){
       };
     });
     redrawFundChart("dpk");
+  }
+
+  const trendEmpFilterEl = document.getElementById("mdTrendEmpFilter");
+  const trendProdFilterEl = document.getElementById("mdTrendProdFilter");
+  function redrawEmployeeTrendChart(){
+    if(!trendEmpFilterEl || !trendProdFilterEl) return;
+    const emp = trendEmpFilterEl.value, prod = trendProdFilterEl.value;
+    const trendData = aggregateEmployeeMonthlyTrend(yearly, emp, prod);
+    const subtitle = `${emp || "Semua Karyawan"} — ${prod || "Semua Produk"} — tren bulanan sepanjang ${year}.`;
+    drawEmployeeTrendChart(trendData, subtitle);
+  }
+  if(trendEmpFilterEl && trendProdFilterEl){
+    trendEmpFilterEl.onchange = redrawEmployeeTrendChart;
+    trendProdFilterEl.onchange = redrawEmployeeTrendChart;
+    redrawEmployeeTrendChart();
   }
 
   function redrawEmployeeTable(teamFilter){
@@ -2426,6 +2468,44 @@ function drawAnnualProductChart(prodStats){
   `;
 }
 
+/* Grafik tren akuisisi 1 karyawan (atau semua) & 1 produk (atau semua) per
+   bulan sepanjang tahun. Beda dengan grafik Laporan Dana: di sini nilai 0
+   MEMANG berarti "tidak ada akuisisi bulan itu" (bukan "belum ada data"),
+   jadi SEMUA 12 titik tetap digambar & disambung, termasuk yang nol. */
+function drawEmployeeTrendChart(trendData, subtitle){
+  const box = document.getElementById("mdTrendChart");
+  if(!box) return;
+  const maxV = Math.max(1, ...trendData.map(d=>d.value));
+  const W = box.clientWidth || 900, H = 300;
+  const padL=55, padB=45, padT=20, padR=20;
+  const chW = W-padL-padR, chH = H-padT-padB;
+  const stepX = chW/(trendData.length-1 || 1);
+  const pts = trendData.map((d,i)=>{
+    const x = padL + stepX*i;
+    const y = padT + chH - (d.value/maxV)*chH;
+    return {x,y,v:d.value};
+  });
+  const line = `<polyline points="${pts.map(p=>`${p.x},${p.y}`).join(" ")}" fill="none" stroke="#5aa8ff" stroke-width="2.5" style="filter:drop-shadow(0 0 5px #5aa8ff)"/>`;
+  const dots = pts.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="#5aa8ff" stroke="var(--navy-900,#0b1e3a)" stroke-width="1.2"/>`).join("");
+  const valueLabels = pts.map(p=>p.v>0 ? `<text x="${p.x}" y="${p.y-10}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#8fc4ff">${fmtNumId(p.v)}</text>` : "").join("");
+  let grid = "";
+  const steps = 5;
+  for(let i=0;i<=steps;i++){
+    const v = maxV*(i/steps);
+    const y = padT+chH-(v/maxV)*chH;
+    grid += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="rgba(255,255,255,0.1)"/>`;
+    grid += `<text x="${padL-8}" y="${y+3}" text-anchor="end" font-size="9.5" fill="var(--ink-400)">${fmtNumId(Math.round(v))}</text>`;
+  }
+  let labels = "";
+  trendData.forEach((d,i)=>{
+    const x = padL + stepX*i;
+    labels += `<text x="${x}" y="${H-padB+18}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#dde5f2">${MONTH_NAMES[parseInt(d.month.split("-")[1],10)-1].slice(0,3)}</text>`;
+  });
+  box.innerHTML = `
+    <p class="hint" style="margin:-2px 0 12px">${subtitle}</p>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible">${grid}${line}${dots}${valueLabels}${labels}</svg>
+  `;
+}
 function drawAnnualFundChart(fundStats){
   const box = document.getElementById("mdFundChart");
   if(!box) return;
@@ -5752,6 +5832,7 @@ const SECTION_LABELS = {
   maindash: {
     employees: "👤 Kinerja Karyawan Tahunan per Produk",
     products: "📦 Akuisisi Produk terhadap Target",
+    employeeTrend: "📈 Tren Akuisisi Karyawan per Bulan",
     fund: "💰 Laporan Dana Tahunan",
     layanan: "🛎️ Layanan &amp; Support Tahunan",
   },
@@ -5761,7 +5842,7 @@ const SECTION_ORDER_DEFAULTS = {
   pipeline: ["filter","kpi","jenis","target","lapor","list"],
   leaderboard: ["chips","list"],
   layanan: ["layananInput","layananLB","efisiensi","layananDetail","penilaianInput","penilaianLB","penilaianDetail"],
-  maindash: ["employees","products","fund","layanan"],
+  maindash: ["employees","products","employeeTrend","fund","layanan"],
 };
 const SECTION_ORDER_CFG_KEY = {
   dashboard: "dashboardSectionOrder",

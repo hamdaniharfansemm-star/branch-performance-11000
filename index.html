@@ -788,20 +788,48 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
         el = document.createElement("div");
         el.id = "fatalErrorBanner";
         el.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#1a0505;color:#ffd7d7;"+
-          "font:12px/1.6 monospace;padding:16px 44px 16px 16px;max-height:45vh;overflow:auto;white-space:pre-wrap;word-break:break-word;"+
+          "font:12px/1.6 monospace;padding:16px 44px 16px 16px;max-height:28vh;overflow:auto;white-space:pre-wrap;word-break:break-word;"+
           "border-bottom:3px solid #ff4d4d;box-shadow:0 10px 30px rgba(0,0,0,0.6);";
         el.innerHTML = "<button id='fatalErrorClose' style='position:absolute;top:10px;right:12px;background:#3a1010;color:#ffd7d7;"+
-          "border:1px solid #663;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:14px'>✕</button>"+
+          "border:1px solid #663;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:14px;z-index:1'>✕</button>"+
           "<div style='font-size:14px;font-weight:800;color:#ff8a8a;margin-bottom:8px'>"+
           "⚠️ Terjadi error teknis — mohon screenshot kotak ini dan kirim ke pengembang</div><div id='fatalErrorList'></div>";
         document.documentElement.appendChild(el);
-        document.getElementById("fatalErrorClose").onclick = function(){ el.remove(); };
+        document.getElementById("fatalErrorClose").onclick = function(){ el.remove(); document.body.style.paddingTop = ""; };
       }
       var list = document.getElementById("fatalErrorList");
+      // PENTING: batasi jumlah baris error yang ditumpuk. Sebelumnya kotak
+      // ini bisa TERUS MEMBESAR tanpa batas kalau banyak error terjadi
+      // beruntun (mis. jaringan benar-benar terputus) -- sampai bisa
+      // MENUTUPI menu navigasi di bawahnya dan memblokir semua klik,
+      // membuat aplikasi macet total tanpa jalan keluar. Sekarang cuma
+      // menyimpan 5 pesan TERBARU, sisanya diringkas jadi satu baris.
+      var MAX_LINES = 5;
       var line = document.createElement("div");
       line.style.cssText = "margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #442020";
       line.textContent = msg;
       list.appendChild(line);
+      while(list.children.length > MAX_LINES){
+        list.removeChild(list.firstChild);
+      }
+      var counterEl = document.getElementById("fatalErrorCounter");
+      if(!counterEl){
+        counterEl = document.createElement("div");
+        counterEl.id = "fatalErrorCounter";
+        counterEl.style.cssText = "font-size:10.5px;color:#c98a8a;margin-top:4px";
+        el.appendChild(counterEl);
+      }
+      window.__fatalErrorTotalCount = (window.__fatalErrorTotalCount||0) + 1;
+      counterEl.textContent = "Total error tercatat: " + window.__fatalErrorTotalCount + " (menampilkan " + Math.min(MAX_LINES, window.__fatalErrorTotalCount) + " terbaru)";
+      // PENTING: dorong SELURUH isi halaman ke bawah sejauh tinggi kotak
+      // ini, supaya kotak error TIDAK PERNAH menutupi/memblokir menu
+      // navigasi atau tombol apa pun di bawahnya -- sebelumnya kotak ini
+      // "mengambang" di atas segalanya (position:fixed) tanpa mendorong
+      // apa pun, jadi kalau ia cukup tinggi (banyak error beruntun), semua
+      // klik ke menu di baris atas jadi terblokir sama sekali.
+      requestAnimationFrame(function(){
+        document.body.style.paddingTop = el.getBoundingClientRect().height + "px";
+      });
     }catch(e){ /* kalau ini pun gagal, sudah tidak ada lagi yang bisa dilakukan */ }
   }
   window.addEventListener("error", function(ev){
@@ -2531,9 +2559,20 @@ async function loadAndDrawMainDashboard(year){
   }
   let yearly;
   try{
-    yearly = await loadYearlyReportsPhase(year);
+    // Jaring pengaman KERAS: kalau memuat data 12 bulan macet lebih dari 30
+    // detik (jaringan sangat lambat, atau server backend belum ter-update),
+    // JANGAN biarkan spinner "Memuat data 12 bulan..." muncul selamanya --
+    // tampilkan pesan error yang jelas + tombol coba lagi, seperti perbaikan
+    // serupa yang sudah diterapkan untuk layar login.
+    yearly = await Promise.race([
+      loadYearlyReportsPhase(year),
+      new Promise((_, reject)=> setTimeout(()=> reject(new Error("Waktu tunggu 30 detik terlampaui")), 30000)),
+    ]);
   }catch(e){
-    loadingBox.innerHTML = `<p class="hint" style="color:var(--danger)">Gagal memuat data tahun ${year}. Coba lagi.</p>`;
+    if(state.tab !== "maindash") return; // pengguna sudah pindah tab
+    loadingBox.innerHTML = `<p class="hint" style="color:var(--danger)">Gagal memuat data tahun ${year}: ${e && e.message || e}</p><button class="btn ghost sm" id="mdRetryBtn" style="margin-top:10px">🔄 Coba Lagi</button>`;
+    const retryBtn = document.getElementById("mdRetryBtn");
+    if(retryBtn) retryBtn.onclick = ()=> loadAndDrawMainDashboard(year);
     return;
   }
   if(state.tab !== "maindash") return; // pengguna sudah pindah tab selama proses memuat
@@ -2549,7 +2588,10 @@ async function loadAndDrawMainDashboard(year){
   // Layanan/Support) begitu selesai -- tanpa mengganggu bagian yang sudah
   // tampil duluan.
   try{
-    const remainder = await loadYearlyRemainderPhase(year);
+    const remainder = await Promise.race([
+      loadYearlyRemainderPhase(year),
+      new Promise((_, reject)=> setTimeout(()=> reject(new Error("timeout 30 detik")), 30000)),
+    ]);
     if(state.tab !== "maindash") return; // pengguna sudah pindah tab
     const yearSelectNow = document.getElementById("mdYearSelect");
     if(!yearSelectNow || parseInt(yearSelectNow.value,10) !== year) return; // pengguna sudah ganti tahun
@@ -2558,9 +2600,16 @@ async function loadAndDrawMainDashboard(year){
     redrawMainDashFundAndLayanan(full, year);
   }catch(e){
     window.__storageErrors.push(String(e && e.message||e));
-    // Gagal memuat sisanya -- bagian Laporan Dana & Layanan tetap kosong,
-    // tapi bagian lain (yang sudah tampil) tidak terganggu. Pengguna bisa
-    // buka ulang tab ini untuk mencoba lagi.
+    // Gagal memuat sisanya -- JANGAN biarkan placeholder "Memuat data
+    // Pipeline Dana..." berputar selamanya; tampilkan pesan gagal yang
+    // jelas supaya pengguna tahu harus buka ulang tab ini untuk mencoba
+    // lagi (bagian lain yang sudah tampil tidak terganggu).
+    if(state.tab !== "maindash") return;
+    const fundBox = document.getElementById("mdSectionFund");
+    const layananBox = document.getElementById("mdSectionLayanan");
+    const failMsg = `<div class="card glow" style="text-align:center;padding:20px"><p class="hint" style="color:var(--danger)">Gagal memuat. Coba buka ulang tab ini.</p></div>`;
+    if(fundBox && fundBox.innerHTML.includes("spinner-ring")) fundBox.innerHTML = failMsg;
+    if(layananBox && layananBox.innerHTML.includes("spinner-ring")) layananBox.innerHTML = failMsg;
   }
 }
 

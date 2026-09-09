@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Branch Performance (11000)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800;900&display=swap" rel="stylesheet">
 <style>
 :root{
   /* ===== Skema warna: Denim Biru + Aluminium (denim blue, brushed
@@ -39,6 +42,10 @@
   --ff-num: 'Manrope', system-ui, sans-serif;
 }
 @font-face{font-family:'Playfair Display';src:local('Playfair Display');}
+/* Render huruf lebih halus & tidak "kaku" -- terutama penting untuk teks
+   putih/terang di atas latar gelap, yang tanpa ini cenderung terlihat
+   kasar/berjaggy di banyak browser. */
+body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility;}
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
 body{
@@ -188,30 +195,35 @@ nav.tabs button.active{
   background:
     repeating-linear-gradient(0deg, rgba(255,255,255,0.014) 0px, rgba(255,255,255,0.014) 1px, transparent 1px, transparent 4px),
     var(--glass);
-  border:1px solid var(--glass-brd);border-radius:14px;
-  padding:14px;position:relative;overflow:hidden;
+  border:1px solid var(--glass-brd);border-radius:16px;
+  padding:16px;position:relative;overflow:hidden;
   box-shadow:
-    0 22px 46px -22px rgba(0,0,0,0.9),
-    0 10px 18px -12px rgba(0,0,0,0.65),
-    0 2px 5px -1px rgba(0,0,0,0.5),
-    0 0 22px -10px rgba(90,168,255,0.3),
-    inset 0 2px 0 rgba(255,255,255,0.4),
-    inset 0 -2px 0 rgba(0,0,0,0.55),
-    inset 2px 0 0 rgba(255,255,255,0.16),
-    inset -2px 0 0 rgba(0,0,0,0.35);
+    0 14px 28px -16px rgba(0,0,0,0.55),
+    0 2px 6px -2px rgba(0,0,0,0.35),
+    inset 0 1px 0 rgba(255,255,255,0.06);
   transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  animation:cardRise .38s cubic-bezier(.22,.61,.36,1) both;
+}
+/* Animasi masuk halus untuk kartu -- mengalir dari sedikit di bawah +
+   transparan menuju posisi & opacity normal, memberi kesan "hidup" seperti
+   dashboard profesional modern (bukan muncul tiba-tiba/statis). */
+@keyframes cardRise{
+  from{opacity:0;transform:translateY(10px);}
+  to{opacity:1;transform:translateY(0);}
+}
+@media (prefers-reduced-motion: reduce){
+  .card{animation:none;}
 }
 .card.glow:hover{
-  transform:translateY(-3px);
-  border-color:rgba(143,194,255,0.35);
+  transform:translateY(-2px);
+  border-color:rgba(143,194,255,0.3);
   box-shadow:
-    0 20px 44px -22px rgba(0,0,0,0.9),
-    0 3px 7px -2px rgba(0,0,0,0.5),
-    0 0 34px -6px rgba(90,168,255,0.5),
-    inset 0 2px 0 rgba(255,255,255,0.45),
-    inset 0 -2px 0 rgba(0,0,0,0.55);
+    0 18px 34px -16px rgba(0,0,0,0.6),
+    0 3px 8px -2px rgba(0,0,0,0.4),
+    0 0 20px -8px rgba(90,168,255,0.28),
+    inset 0 1px 0 rgba(255,255,255,0.08);
 }
-.card.compact{padding:11px;}
+.card.compact{padding:13px;}
 .card.compact .lbl{font-size:9.5px;letter-spacing:0.8px;}
 .card.compact .val{font-size:18px;margin-top:3px;}
 .card.compact .sub{font-size:10.5px;margin-top:3px;}
@@ -242,7 +254,7 @@ nav.tabs button.active{
 .kpi .sub{font-size:10.5px;color:var(--ink-200);margin-top:5px;display:flex;align-items:center;gap:5px;font-weight:600;}
 .kpi .sub.up{color:var(--ok);}
 .kpi .sub.down{color:var(--danger);}
-.kpi .glyph{position:absolute;right:11px;top:11px;font-size:18px;opacity:0.55;filter:drop-shadow(0 0 8px rgba(244,201,93,0.6));}
+.kpi .glyph{position:absolute;right:12px;top:12px;font-size:15px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:linear-gradient(145deg,rgba(244,201,93,0.16),rgba(244,201,93,0.05));border:1px solid rgba(244,201,93,0.25);filter:none;}
 
 h2.sec{font-family:var(--ff-display);font-size:20px;margin:28px 0 14px;color:var(--gold-300);display:flex;align-items:center;gap:10px;}
 h2.sec{
@@ -485,6 +497,14 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
 .orb.o-gold{background:radial-gradient(circle, rgba(244,201,93,0.6), transparent 70%);width:140px;height:140px;top:-40px;right:-30px;}
 .orb.o-blue{background:radial-gradient(circle, rgba(47,111,214,0.6), transparent 70%);width:160px;height:160px;bottom:-50px;left:-40px;}
 .card > *{position:relative;z-index:1;}
+/* PENTING: aturan di atas (.card > *) tanpa sengaja ikut menimpa posisi
+   .orb (elemen dekoratif "glow" di pojok kartu) dari absolute jadi
+   relative -- akibatnya .orb (110-160px) ikut memakan RUANG NYATA di
+   dalam kartu, bukan cuma tampil sebagai cahaya dekoratif di belakang.
+   Inilah salah satu penyebab utama kartu terasa "boros" (banyak ruang
+   kosong di atas judul). Kembalikan .orb ke posisi absolute & di lapisan
+   paling belakang. */
+.card > .orb{position:absolute !important;z-index:0;}
 .kpi .orb{opacity:0.3;}
 .card.compact .orb{width:110px;height:110px;}
 
@@ -532,7 +552,13 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
   background:
     radial-gradient(1000px 650px at 20% 10%, rgba(47,111,214,0.30), transparent 60%),
     radial-gradient(800px 550px at 85% 90%, rgba(62,230,242,0.14), transparent 55%),
+    /* Tekstur elegan: garis diagonal tipis + titik halus, opacity sangat
+       rendah supaya cuma terasa sebagai "kilau" halus di latar belakang,
+       tidak mengganggu keterbacaan form login. */
+    repeating-linear-gradient(135deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 34px),
+    radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1.4px),
     linear-gradient(160deg, #030710, #0a1830 55%, #040911);
+  background-size:auto, auto, auto, 26px 26px, auto;
   padding:20px;
   animation:loginFade .18s ease;
 }
@@ -2074,6 +2100,29 @@ document.getElementById("musicBtn").onclick = ()=>{
    RENDER — TAB ROUTER
    ============================================================ */
 const view = document.getElementById("view");
+/* Animasi "tumbuh" otomatis untuk semua bar-fill (progress bar) begitu
+   muncul di layar -- tanpa perlu mengubah SETIAP fungsi render satu-satu.
+   Cara kerja: begitu elemen .bar-fill baru muncul di DOM, lebar aslinya
+   disimpan lalu SEMENTARA diset ke 0%, dipaksa reflow, baru dikembalikan
+   ke lebar aslinya -- CSS transition yang sudah ada (lihat .bar-fill)
+   otomatis membuatnya terlihat "tumbuh" dari kiri ke kanan. */
+function animateBarFillsIn(root){
+  (root||document).querySelectorAll(".bar-fill:not([data-anim-done])").forEach(el=>{
+    const target = el.style.width || "0%";
+    el.setAttribute("data-anim-done", "1");
+    el.style.width = "0%";
+    // eslint-disable-next-line no-unused-expressions
+    el.offsetHeight; // paksa reflow supaya transisi benar-benar terpicu
+    requestAnimationFrame(()=>{ el.style.width = target; });
+  });
+}
+if(window.MutationObserver){
+  new MutationObserver((mutations)=>{
+    let hasNew = false;
+    for(const m of mutations){ if(m.addedNodes && m.addedNodes.length){ hasNew = true; break; } }
+    if(hasNew) animateBarFillsIn(view);
+  }).observe(view, {childList:true, subtree:true});
+}
 
 function setTab(tab){
   state.tab = tab;
@@ -2202,13 +2251,15 @@ function aggregateAnnualFundStats(yearly, jenisList){
 function aggregateEmployeeMonthlyTrend(yearly, employeeFilter, productFilter){
   return yearly.months.map(mo=>{
     let total = 0;
+    const byProduct = {};
     (yearly.reportsByMonth[mo]||[]).forEach(r=>{
       if(r.status !== "approved") return;
       if(employeeFilter && r.employee !== employeeFilter) return;
       if(productFilter && r.product !== productFilter) return;
       total += Number(r.amount||0);
+      byProduct[r.product] = (byProduct[r.product]||0) + Number(r.amount||0);
     });
-    return {month: mo, value: total};
+    return {month: mo, value: total, byProduct};
   });
 }
 function aggregateAnnualLayananStats(yearly){
@@ -2437,7 +2488,13 @@ function drawMainDashboardContent(yearly, year, content){
       </div>`,
     products: `
       <h2 class="sec">📦 Akuisisi Produk terhadap Target — Tahunan (${year}) <span class="line"></span></h2>
-      <div class="chart-card-light" id="mdProductChart" style="margin-bottom:18px"></div>`,
+      <div class="grid cols-2" style="gap:16px;margin-bottom:18px;align-items:stretch">
+        <div class="chart-card-light" id="mdProductChart"></div>
+        <div class="chart-card-light">
+          <h3 class="sub">🍩 Proporsi Akuisisi per Produk</h3>
+          <div id="mdProductDonut"></div>
+        </div>
+      </div>`,
     employeeTrend: `
       <h2 class="sec">📈 Tren Akuisisi Karyawan per Bulan (${year}) <span class="line"></span></h2>
       <div class="chart-card-light" style="margin-bottom:18px">
@@ -2462,6 +2519,7 @@ function drawMainDashboardContent(yearly, year, content){
   content.innerHTML = order.map(k=>sections[k]||"").join("\n");
 
   drawAnnualProductChart(prodStats);
+  drawProductDonutChart(prodStats);
   if(!yearly._partial) wireMainDashFundHandlers(yearly, year);
 
   const trendEmpFilterEl = document.getElementById("mdTrendEmpFilter");
@@ -2546,6 +2604,51 @@ function openMainDashEmployeeDetail(name, empStats, year){
   document.getElementById("modalBackdrop").onclick = (ev)=>{ if(ev.target.id==="modalBackdrop") closeModal(); };
 }
 
+/* Donut chart -- proporsi Account per produk terhadap TOTAL seluruh
+   produk, supaya sekilas kelihatan produk mana yang paling mendominasi
+   akuisisi (mirip "Acquisition Channels" pada dashboard referensi). */
+function drawProductDonutChart(prodStats){
+  const box = document.getElementById("mdProductDonut");
+  if(!box) return;
+  const total = prodStats.reduce((s,d)=>s+d.achieved, 0);
+  const COLORS = ["#5aa8ff","#f4c95d","#3ee08e","#c586ff","#ff8fa3","#7fd8e8","#ffb84f","#8f9bff","#6fe0c0","#e08fef","#ff6b6b","#a0c8ff"];
+  const W = 220, H = 220, cx = W/2, cy = H/2, rOuter = 88, rInner = 54;
+  if(total<=0){
+    box.innerHTML = `<div style="text-align:center;padding:30px 10px" class="hint">Belum ada akuisisi produk di tahun ini.</div>`;
+    return;
+  }
+  const sorted = [...prodStats].filter(d=>d.achieved>0).sort((a,b)=>b.achieved-a.achieved);
+  let angle = -90; // mulai dari jam 12
+  let arcs = "";
+  const legend = sorted.map((d,i)=>{
+    const pct = d.achieved/total;
+    const sweep = pct*360;
+    const startRad = angle*Math.PI/180;
+    const endRad = (angle+sweep)*Math.PI/180;
+    const x1 = cx + rOuter*Math.cos(startRad), y1 = cy + rOuter*Math.sin(startRad);
+    const x2 = cx + rOuter*Math.cos(endRad), y2 = cy + rOuter*Math.sin(endRad);
+    const x3 = cx + rInner*Math.cos(endRad), y3 = cy + rInner*Math.sin(endRad);
+    const x4 = cx + rInner*Math.cos(startRad), y4 = cy + rInner*Math.sin(startRad);
+    const largeArc = sweep>180 ? 1 : 0;
+    const color = COLORS[i%COLORS.length];
+    arcs += `<path d="M ${x1},${y1} A ${rOuter},${rOuter} 0 ${largeArc} 1 ${x2},${y2} L ${x3},${y3} A ${rInner},${rInner} 0 ${largeArc} 0 ${x4},${y4} Z" fill="${color}" stroke="var(--navy-900,#0b1e3a)" stroke-width="1.5"><title>${d.product}: ${fmtNumId(d.achieved)} (${(pct*100).toFixed(1)}%)</title></path>`;
+    angle += sweep;
+    return `<span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-200)">
+      <span style="width:9px;height:9px;border-radius:50%;background:${color};flex-shrink:0"></span>
+      ${d.product} <b style="color:#fff">${(pct*100).toFixed(0)}%</b>
+    </span>`;
+  }).join("");
+  box.innerHTML = `
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;justify-content:center">
+      <svg viewBox="0 0 ${W} ${H}" style="width:180px;height:180px;flex-shrink:0">
+        ${arcs}
+        <text x="${cx}" y="${cy-6}" text-anchor="middle" font-size="20" font-weight="800" fill="#fff">${fmtNumId(total)}</text>
+        <text x="${cx}" y="${cy+14}" text-anchor="middle" font-size="9.5" fill="var(--ink-400)">Total Account</text>
+      </svg>
+      <div style="display:flex;flex-direction:column;gap:7px;min-width:140px">${legend}</div>
+    </div>
+  `;
+}
 function drawAnnualProductChart(prodStats){
   const box = document.getElementById("mdProductChart");
   if(!box) return;
@@ -2586,6 +2689,26 @@ function drawAnnualProductChart(prodStats){
    bulan sepanjang tahun. Beda dengan grafik Laporan Dana: di sini nilai 0
    MEMANG berarti "tidak ada akuisisi bulan itu" (bukan "belum ada data"),
    jadi SEMUA 12 titik tetap digambar & disambung, termasuk yang nol. */
+/* Ubah daftar titik {x,y} jadi path SVG melengkung halus (Catmull-Rom ->
+   Bezier) -- dipakai supaya grafik garis terlihat mengalir profesional,
+   bukan patah-patah lurus antar titik. */
+function smoothSvgPath(pts){
+  if(pts.length < 2) return "";
+  if(pts.length === 2) return `M ${pts[0].x},${pts[0].y} L ${pts[1].x},${pts[1].y}`;
+  let d = `M ${pts[0].x},${pts[0].y} `;
+  for(let i=0;i<pts.length-1;i++){
+    const p0 = pts[i-1] || pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i+1];
+    const p3 = pts[i+2] || p2;
+    const cp1x = p1.x + (p2.x - p0.x)/6;
+    const cp1y = p1.y + (p2.y - p0.y)/6;
+    const cp2x = p2.x - (p3.x - p1.x)/6;
+    const cp2y = p2.y - (p3.y - p1.y)/6;
+    d += `C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y} `;
+  }
+  return d;
+}
 function drawEmployeeTrendChart(trendData, subtitle){
   const box = document.getElementById("mdTrendChart");
   if(!box) return;
@@ -2597,11 +2720,14 @@ function drawEmployeeTrendChart(trendData, subtitle){
   const pts = trendData.map((d,i)=>{
     const x = padL + stepX*i;
     const y = padT + chH - (d.value/maxV)*chH;
-    return {x,y,v:d.value};
+    return {x,y,v:d.value,month:d.month,byProduct:d.byProduct};
   });
-  const line = `<polyline points="${pts.map(p=>`${p.x},${p.y}`).join(" ")}" fill="none" stroke="#5aa8ff" stroke-width="2.5" style="filter:drop-shadow(0 0 5px #5aa8ff)"/>`;
-  const dots = pts.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="#5aa8ff" stroke="var(--navy-900,#0b1e3a)" stroke-width="1.2"/>`).join("");
-  const valueLabels = pts.map(p=>p.v>0 ? `<text x="${p.x}" y="${p.y-10}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#8fc4ff">${fmtNumId(p.v)}</text>` : "").join("");
+  const smoothD = smoothSvgPath(pts);
+  const areaD = `${smoothD} L ${pts[pts.length-1].x},${padT+chH} L ${pts[0].x},${padT+chH} Z`;
+  const area = `<path d="${areaD}" fill="url(#trendAreaGrad)" opacity="0.5"/>`;
+  const line = `<path d="${smoothD}" fill="none" stroke="#5aa8ff" stroke-width="2.5" stroke-linecap="round" style="filter:drop-shadow(0 0 5px #5aa8ff)"/>`;
+  const dots = pts.map((p,i)=>`<circle cx="${p.x}" cy="${p.y}" r="6" fill="#5aa8ff" stroke="var(--navy-900,#0b1e3a)" stroke-width="1.2" data-trend-dot="${i}" style="cursor:pointer"/>`).join("");
+  const valueLabels = pts.map(p=>p.v>0 ? `<text x="${p.x}" y="${p.y-12}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#8fc4ff">${fmtNumId(p.v)}</text>` : "").join("");
   let grid = "";
   const steps = 5;
   for(let i=0;i<=steps;i++){
@@ -2616,8 +2742,38 @@ function drawEmployeeTrendChart(trendData, subtitle){
     labels += `<text x="${x}" y="${H-padB+18}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#dde5f2">${MONTH_NAMES[parseInt(d.month.split("-")[1],10)-1].slice(0,3)}</text>`;
   });
   box.innerHTML = `
-    <p class="hint" style="margin:-2px 0 12px">${subtitle}</p>
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible">${grid}${line}${dots}${valueLabels}${labels}</svg>
+    <p class="hint" style="margin:-2px 0 12px">${subtitle} <span style="color:var(--gold-300)">Klik titik bulan mana pun untuk lihat rincian per produk.</span></p>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible">
+      <defs><linearGradient id="trendAreaGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#5aa8ff" stop-opacity="0.35"/>
+        <stop offset="100%" stop-color="#5aa8ff" stop-opacity="0"/>
+      </linearGradient></defs>
+      ${grid}${area}${line}${dots}${valueLabels}${labels}
+    </svg>
+    <div id="mdTrendDetailBox" style="margin-top:14px"></div>
+  `;
+  box.querySelectorAll("[data-trend-dot]").forEach(dot=>{
+    dot.onclick = ()=>{
+      const p = pts[parseInt(dot.dataset.trendDot,10)];
+      showTrendMonthDetail(p, subtitle);
+    };
+  });
+}
+/* Tampilkan rincian per produk untuk 1 bulan yang diklik di grafik Tren
+   Akuisisi Karyawan -- mis. klik titik Februari, muncul MTB: 3, Payroll: 5,
+   Kopra: 3, dst (sesuai filter karyawan/produk yang sedang aktif). */
+function showTrendMonthDetail(point, subtitle){
+  const box = document.getElementById("mdTrendDetailBox");
+  if(!box) return;
+  const monthName = MONTH_NAMES[parseInt(point.month.split("-")[1],10)-1];
+  const entries = Object.entries(point.byProduct||{}).sort((a,b)=>b[1]-a[1]);
+  box.innerHTML = `
+    <div class="card glow compact" style="border-color:rgba(90,168,255,0.4)">
+      <h4 style="font-size:13px;color:var(--gold-300);margin:0 0 10px">📌 Rincian ${monthName} ${point.month.split("-")[0]} — Total ${fmtNumId(point.v)} account</h4>
+      ${entries.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${entries.map(([prod,amt])=>`<span class="badge ok" style="font-size:11.5px">📦 ${prod}: <b>${fmtNumId(amt)}</b></span>`).join("")}
+      </div>` : `<p class="hint">Tidak ada akuisisi bulan ini.</p>`}
+    </div>
   `;
 }
 function drawAnnualFundChart(fundStats){
@@ -2651,7 +2807,7 @@ function drawAnnualFundChart(fundStats){
     let out = "";
     segments.forEach(seg=>{
       if(seg.length>1){
-        out += `<polyline points="${seg.map(p=>`${p.x},${p.y}`).join(" ")}" fill="none" stroke="${color}" stroke-width="2.5" style="filter:drop-shadow(0 0 5px ${color})"/>`;
+        out += `<path d="${smoothSvgPath(seg)}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" style="filter:drop-shadow(0 0 5px ${color})"/>`;
       }
       seg.forEach(p=>{
         out += `<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="${color}" stroke="var(--navy-900,#0b1e3a)" stroke-width="1.2"/>`;
@@ -3621,9 +3777,13 @@ function renderLeadsSubTab(container){
       <div class="card glow">
         <div class="orb o-gold"></div>
         <h3 class="sub">Unggah Leads (Excel)</h3>
-        <p class="hint" style="margin-bottom:12px">Kolom yang dibaca: <b>Nama Produk</b>, <b>Nama Potensi</b>, <b>No HP / No Rekening</b> (nama kolom fleksibel, tidak harus persis).</p>
+        <p class="hint" style="margin-bottom:12px">Kolom yang dibaca: <b>Nama Produk</b>, <b>Nama Potensi</b>, <b>No HP / No Rekening</b>, <b>Karyawan Ditugaskan</b> (opsional — kalau diisi, nama karyawan harus persis sama dengan yang terdaftar; kalau kosong, lead tetap terlihat untuk semua karyawan seperti biasa).</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="btn ghost sm" id="leadsTemplateBtn" type="button">📋 Unduh Template Excel</button>
+        </div>
         <input type="file" id="leadsFile" accept=".xlsx,.xls,.csv" style="margin-bottom:12px">
         <button class="btn primary" id="leadsUploadBtn">📤 Unggah &amp; Tambahkan</button>
+        <div id="leadsUploadResultBox" style="margin-top:12px"></div>
       </div>
       <div class="card glow">
         <div class="orb o-blue"></div>
@@ -3634,33 +3794,57 @@ function renderLeadsSubTab(container){
           </div>
           <div class="field"><label>Nama Potensi (Calon Nasabah)</label><input type="text" id="ld_name" required></div>
           <div class="field"><label>No HP / No Rekening</label><input type="text" id="ld_contact" required></div>
+          <div class="field"><label>Tugaskan ke Karyawan (opsional)</label>
+            <select id="ld_assignedTo"><option value="">-- Tidak ditugaskan, terlihat semua --</option>${CFG.employees.map(e=>`<option value="${e.name}">${e.name} (${e.team})</option>`).join("")}</select>
+          </div>
           <button type="submit" class="btn primary">➕ Tambah Lead</button>
         </form>
       </div>
     </div>
     ` : ``}
     <h2 class="sec">Daftar Leads <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">${state.leads.length} total</span></h2>
+    ${!isAdmin ? `
+    <div class="field" style="max-width:340px"><label>Nama Saya (untuk melihat tugas Anda)</label>
+      <select id="leadsMyNameSelect"><option value="">-- Pilih nama Anda --</option>${CFG.employees.map(e=>`<option value="${e.name}">${e.name} (${e.team})</option>`).join("")}</select>
+    </div>` : ""}
     <div class="chip-row" id="leadsChips">
       <div class="chip active" data-scope="all">🌐 Semua Produk</div>
+      ${!isAdmin ? `<div class="chip" data-scope="mytask">🎯 Tugas Saya</div>` : ""}
       ${CFG.products.map(p=>`<div class="chip" data-scope="${p}">${p}</div>`).join("")}
     </div>
     <div class="card glow"><div id="leadsList"></div></div>
   `;
   if(isAdmin){
     document.getElementById("leadsUploadBtn").onclick = handleLeadsUpload;
+    document.getElementById("leadsTemplateBtn").onclick = downloadLeadsTemplate;
     document.getElementById("leadForm").onsubmit = async (e)=>{
       e.preventDefault();
       const product = document.getElementById("ld_product").value;
       const name = document.getElementById("ld_name").value.trim();
       const contact = document.getElementById("ld_contact").value.trim();
+      const assignedTo = document.getElementById("ld_assignedTo").value;
       if(!name || !contact){ toast("Lengkapi nama potensi & kontak", "⚠️"); return; }
-      const newLead = {id:uid(), product, name, contact, uploadedAt:Date.now()};
+      const newLead = {id:uid(), product, name, contact, assignedTo: assignedTo||null, uploadedAt:Date.now()};
       await mutateAndSave(KEY_LEADS, "leads", (fresh)=>{ fresh.push(newLead); });
       toast("Lead berhasil ditambahkan", "✅");
       playSound("bell");
       e.target.reset();
       if(state.tab !== "leads") return; // pengguna sudah pindah tab
       drawLeadsList("all");
+    };
+  } else {
+    const myNameSel = document.getElementById("leadsMyNameSelect");
+    const savedName = (CFG.userAuth && CFG.userAuth[state.nip] && CFG.userAuth[state.nip].employeeName) || "";
+    if(savedName) myNameSel.value = savedName;
+    myNameSel.onchange = async ()=>{
+      const activeChip = document.querySelector("#leadsChips .chip.active");
+      drawLeadsList(activeChip ? activeChip.dataset.scope : "all");
+      const chosen = myNameSel.value;
+      await mutateConfigAndSave((cfg)=>{
+        if(!cfg.userAuth) cfg.userAuth = {};
+        if(!cfg.userAuth[state.nip]) return;
+        cfg.userAuth[state.nip].employeeName = chosen;
+      });
     };
   }
   document.querySelectorAll("#leadsChips .chip").forEach(c=>{
@@ -3899,8 +4083,9 @@ function drawLeadsList(scope){
   const priority = Array.isArray(CFG.leadsPriorityProducts) ? CFG.leadsPriorityProducts : [];
   const priorityIndex = {}; priority.forEach((p,i)=>{ priorityIndex[p.product] = i; });
   const urgentSet = new Set(priority.filter(p=>p.urgent).map(p=>p.product));
+  const myName = (CFG.userAuth && CFG.userAuth[state.nip] && CFG.userAuth[state.nip].employeeName) || "";
   const list = [...state.leads]
-    .filter(l=> scope==="all" || l.product===scope)
+    .filter(l=> scope==="all" || (scope==="mytask" ? l.assignedTo===myName : l.product===scope))
     .sort((a,b)=>{
       // Produk prioritas tampil PALING ATAS, sesuai urutan yang diatur Admin;
       // sisanya tetap terurut berdasarkan tanggal upload seperti biasa.
@@ -3910,24 +4095,28 @@ function drawLeadsList(scope){
       if(pb!==undefined) return 1;
       return (b.uploadedAt||0)-(a.uploadedAt||0);
     });
-  if(!list.length){ box.innerHTML = `<div class="empty"><div class="e-ic">🎯</div>Belum ada data leads.</div>`; return; }
+  if(scope==="mytask" && !myName){ box.innerHTML = `<div class="empty"><div class="e-ic">👤</div>Pilih nama Anda di atas dulu untuk melihat tugas Anda.</div>`; return; }
+  if(!list.length){ box.innerHTML = `<div class="empty"><div class="e-ic">🎯</div>Belum ada data leads${scope==="mytask"?" yang ditugaskan ke Anda":""}.</div>`; return; }
   box.innerHTML = `<div style="max-height:520px;overflow:auto"><table class="data">
-    <thead><tr><th>Produk</th><th>Nama Potensi</th><th>No HP / Rekening</th><th>Status Follow Up</th><th>Tanggal</th>${isAdmin?'<th></th>':''}</tr></thead>
+    <thead><tr><th>Produk</th><th>Nama Potensi</th><th>No HP / Rekening</th><th>Ditugaskan</th><th>Status Follow Up</th><th>Tanggal</th>${isAdmin?'<th></th>':''}</tr></thead>
     <tbody>
     ${list.map(l=>{
       const wa = waLink(l.contact);
       const contactHtml = wa
         ? `<a href="${wa}" target="_blank" rel="noopener" class="wa-link" data-lead-id="${l.id}">💬 ${l.contact}</a>`
         : l.contact;
+      const doneByLabel = l.followedByName || l.followedBy || "";
       const statusHtml = l.followedBy
-        ? `<span class="badge ok" style="font-size:10.5px">✅ Done oleh ${l.followedBy}</span>`
+        ? `<span class="badge ok" style="font-size:10.5px">✅ Done oleh ${doneByLabel}</span>`
         : (state.role!=="admin" ? `<button class="btn sm" data-followup="${l.id}">📞 Tandai Follow Up</button>` : `<span class="badge warn" style="font-size:10.5px">Belum di-follow up</span>`);
       const isUrgent = urgentSet.has(l.product);
       const prodCell = isUrgent
         ? `<b style="color:var(--danger)">🔥 ${l.product}</b>`
         : (priorityIndex[l.product]!==undefined ? `<b style="color:var(--gold-300)">⭐ ${l.product}</b>` : `<b>${l.product}</b>`);
+      const assignedCell = l.assignedTo ? `<span class="badge pending" style="font-size:10px">👤 ${l.assignedTo}</span>` : `<span class="hint" style="font-size:11px">Semua karyawan</span>`;
       return `<tr${isUrgent?' style="background:rgba(220,80,80,0.08)"':''}>
       <td>${prodCell}</td><td>${l.name}</td><td>${contactHtml}</td>
+      <td>${assignedCell}</td>
       <td>${statusHtml}</td>
       <td>${l.uploadedAt ? new Date(l.uploadedAt).toLocaleDateString('id-ID') : '-'}</td>
       ${isAdmin?`<td style="white-space:nowrap"><button class="btn ghost sm" data-ld-edit="${l.id}">✏️</button> <button class="btn danger sm" data-ld-del="${l.id}">🗑️</button></td>`:''}
@@ -3938,10 +4127,12 @@ function drawLeadsList(scope){
     a.addEventListener("click", async ()=>{
       const lead = state.leads.find(x=>x.id===a.dataset.leadId);
       if(lead && !lead.followedBy && state.role!=="admin" && state.nip){
-        const followedBy = state.nip, followedAt = Date.now();
+        const nameSelNow = document.getElementById("leadsMyNameSelect");
+        const currentName = nameSelNow ? nameSelNow.value : myName;
+        const followedBy = state.nip, followedByName = currentName || null, followedAt = Date.now();
         await mutateAndSave(KEY_LEADS, "leads", (fresh)=>{
           const target = fresh.find(x=>x.id===lead.id);
-          if(target && !target.followedBy){ target.followedBy = followedBy; target.followedAt = followedAt; }
+          if(target && !target.followedBy){ target.followedBy = followedBy; target.followedByName = followedByName; target.followedAt = followedAt; }
         });
         drawLeadsList(scope);
       }
@@ -3951,10 +4142,12 @@ function drawLeadsList(scope){
     b.onclick = async ()=>{
       const lead = state.leads.find(x=>x.id===b.dataset.followup);
       if(!lead) return;
-      const followedBy = state.nip || "Karyawan", followedAt = Date.now();
+      const nameSelNow = document.getElementById("leadsMyNameSelect");
+      const currentName = nameSelNow ? nameSelNow.value : myName;
+      const followedBy = state.nip || "Karyawan", followedByName = currentName || null, followedAt = Date.now();
       await mutateAndSave(KEY_LEADS, "leads", (fresh)=>{
         const target = fresh.find(x=>x.id===lead.id);
-        if(target){ target.followedBy = followedBy; target.followedAt = followedAt; }
+        if(target){ target.followedBy = followedBy; target.followedByName = followedByName; target.followedAt = followedAt; }
       });
       toast(`Lead ${lead.name} ditandai sudah di-follow up`, "✅");
       playSound("bell");
@@ -3987,6 +4180,9 @@ function openEditLead(id, scope){
         </div>
         <div class="field"><label>Nama Potensi (Calon Nasabah)</label><input type="text" id="ed_name" value="${lead.name}"></div>
         <div class="field"><label>No HP / No Rekening</label><input type="text" id="ed_contact" value="${lead.contact}"></div>
+        <div class="field"><label>Tugaskan ke Karyawan</label>
+          <select id="ed_assignedTo"><option value="">-- Tidak ditugaskan, terlihat semua --</option>${CFG.employees.map(e=>`<option value="${e.name}" ${e.name===lead.assignedTo?'selected':''}>${e.name} (${e.team})</option>`).join("")}</select>
+        </div>
         <button class="btn primary" id="ed_saveBtn">💾 Simpan Perubahan</button>
       </div>
     </div>
@@ -3998,9 +4194,10 @@ function openEditLead(id, scope){
     const contact = document.getElementById("ed_contact").value.trim();
     if(!name || !contact){ toast("Lengkapi nama & kontak", "⚠️"); return; }
     const newProduct = document.getElementById("ed_product").value;
+    const newAssignedTo = document.getElementById("ed_assignedTo").value || null;
     await mutateAndSave(KEY_LEADS, "leads", (fresh)=>{
       const target = fresh.find(x=>x.id===lead.id);
-      if(target){ target.product = newProduct; target.name = name; target.contact = contact; }
+      if(target){ target.product = newProduct; target.name = name; target.contact = contact; target.assignedTo = newAssignedTo; }
     });
     toast("Lead berhasil diperbarui", "✅");
     playSound("bell");
@@ -4125,14 +4322,42 @@ async function handleBulkAcquisitionUpload(){
     box.innerHTML = html;
     toast(`${savedCount} laporan berhasil diunggah`, "📤");
     playSound("bell");
+    // PENTING: gambar ulang daftar laporan yang tampil (kalau bulan yang
+    // sedang dibuka termasuk yang baru diunggah), supaya entri baru
+    // LANGSUNG terlihat dengan tombol Ubah/Hapus-nya -- sebelumnya data
+    // tersimpan dengan benar tapi layarnya tidak ikut diperbarui sampai
+    // pengguna pindah tab atau memuat ulang halaman.
+    if(state.tab === "admin" && document.getElementById("adminList")){
+      const allNow = [...(state._dupMarked||markDuplicates(state.reports))].sort((a,b)=>b.createdAt-a.createdAt);
+      renderAdminList(allNow);
+    }
   }catch(err){
     console.error(err);
     box.innerHTML = `<p class="hint" style="color:var(--danger)">Gagal memproses file: ${err.message||err}</p>`;
     btn.disabled = false; btn.textContent = "📤 Upload & Proses";
   }
 }
+async function downloadLeadsTemplate(){
+  try{
+    await ensureXLSX();
+    const sampleRows = [
+      {"Nama Produk": CFG.products[0] || "Contoh Produk", "Nama Potensi": "Contoh Nasabah A", "No HP / No Rekening": "0812xxxxxxx", "Karyawan Ditugaskan": CFG.employees[0] ? CFG.employees[0].name : ""},
+      {"Nama Produk": CFG.products[0] || "Contoh Produk", "Nama Potensi": "Contoh Nasabah B", "No HP / No Rekening": "0813xxxxxxx", "Karyawan Ditugaskan": ""},
+    ];
+    const ws = XLSX.utils.json_to_sheet(sampleRows);
+    ws["!cols"] = [{wch:18},{wch:22},{wch:20},{wch:26}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Leads");
+    XLSX.writeFile(wb, "Template_Leads.xlsx");
+    toast("Template berhasil diunduh", "📋");
+  }catch(err){
+    console.error(err);
+    toast("Gagal membuat template, coba lagi", "⚠️");
+  }
+}
 async function handleLeadsUpload(){
   const fileInput = document.getElementById("leadsFile");
+  const box = document.getElementById("leadsUploadResultBox");
   const file = fileInput.files[0];
   if(!file){ toast("Pilih file Excel/CSV terlebih dahulu", "⚠️"); return; }
   try{
@@ -4150,26 +4375,45 @@ async function handleLeadsUpload(){
       }
       return null;
     };
+    const empByLower = {}; CFG.employees.forEach(e=>{ empByLower[e.name.toLowerCase().trim()] = e.name; });
     let added = 0;
     const newLeads = [];
-    rows.forEach(row=>{
+    const assignErrors = [];
+    rows.forEach((row, idx)=>{
       const kProduct = findKey(row, ["produk"]);
       const kName = findKey(row, ["potensi","nasabah","nama"]);
       const kContact = findKey(row, ["hp","telepon","rekening","kontak","no"]);
+      const kAssigned = findKey(row, ["ditugaskan","karyawan","assign","petugas"]);
       const product = kProduct ? String(row[kProduct]).trim() : "";
       const name = kName ? String(row[kName]).trim() : "";
       const contact = kContact ? String(row[kContact]).trim() : "";
+      const rawAssigned = kAssigned ? String(row[kAssigned]).trim() : "";
       if(!name && !contact) return;
       const matchedProduct = CFG.products.find(p=>p.toLowerCase()===product.toLowerCase()) || product || "Lainnya";
-      newLeads.push({id:uid(), product:matchedProduct, name:name||"-", contact:contact||"-", uploadedAt:Date.now()});
+      let assignedTo = null;
+      if(rawAssigned){
+        const match = empByLower[rawAssigned.toLowerCase()];
+        if(match) assignedTo = match;
+        else assignErrors.push(`Baris ${idx+2}: karyawan "${rawAssigned}" tidak ditemukan — lead tetap ditambahkan tanpa penugasan.`);
+      }
+      newLeads.push({id:uid(), product:matchedProduct, name:name||"-", contact:contact||"-", assignedTo, uploadedAt:Date.now()});
       added++;
     });
     if(added===0){ toast("Tidak ada baris valid yang terbaca dari file", "⚠️"); return; }
     await mutateAndSave(KEY_LEADS, "leads", (fresh)=>{ fresh.push(...newLeads); });
-    toast(`${added} leads berhasil diunggah & langsung tampil ke karyawan`, "🎉");
+    const assignedCount = newLeads.filter(l=>l.assignedTo).length;
+    toast(`${added} leads berhasil diunggah`, "🎉");
     playSound("bell");
     fileInput.value = "";
-    drawLeadsList("all");
+    if(box){
+      let html = `<p style="font-weight:700;color:var(--ok)">✅ ${added} leads berhasil diunggah (${assignedCount} langsung ditugaskan ke karyawan tertentu, sisanya terlihat untuk semua).</p>`;
+      if(assignErrors.length){
+        html += `<p style="font-weight:700;color:var(--warn,#c98a1f);margin-top:8px">⚠️ ${assignErrors.length} penugasan gagal:</p>
+          <ul style="margin:0 0 0 18px;font-size:12px;color:var(--ink-200)">${assignErrors.slice(0,30).map(e=>`<li>${e}</li>`).join("")}</ul>`;
+      }
+      box.innerHTML = html;
+    }
+    if(state.tab === "leads") drawLeadsList("all");
   }catch(err){
     toast("Gagal membaca file. Pastikan format Excel/CSV valid.", "⚠️");
   }

@@ -34,7 +34,7 @@
   --danger:#ff6b6b;
   --ok:#3ee08e;
   --warn:#ffb84f;
-  --glass: linear-gradient(160deg, rgba(18,38,62,0.5), rgba(8,16,28,0.56));
+  --glass: linear-gradient(160deg, rgba(18,38,62,0.72), rgba(8,16,28,0.78));
   --glass-brd: rgba(235,240,248,0.14);
   --radius:18px;
   --ff-display: 'Playfair Display', Georgia, 'Times New Roman', serif;
@@ -201,8 +201,13 @@ nav.tabs button.active::after{
     var(--glass);
   border:1px solid var(--glass-brd);border-radius:16px;
   padding:16px;position:relative;overflow:hidden;
-  backdrop-filter:blur(16px) saturate(1.15);
-  -webkit-backdrop-filter:blur(16px) saturate(1.15);
+  /* PERFORMA: backdrop-filter:blur() SENGAJA DIHILANGKAN dari kartu biasa.
+     Efek blur ini SANGAT berat untuk GPU, dan karena kartu ini muncul
+     BERKALI-KALI per halaman (bisa belasan sekaligus di Main
+     Dashboard/Riwayat), inilah penyebab NYATA aplikasi terasa lambat di
+     HP -- bukan jaringan/data. Warna latar sudah cukup transparan (lihat
+     var(--glass)) untuk kesan "kaca" tanpa perlu blur mahal. Blur hanya
+     dipakai di TEMPAT YANG SEDIKIT jumlahnya (header, kartu login, modal). */
   box-shadow:
     0 14px 28px -16px rgba(0,0,0,0.5),
     0 2px 6px -2px rgba(0,0,0,0.3),
@@ -568,7 +573,9 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
     repeating-linear-gradient(0deg, rgba(255,255,255,0.014) 0px, rgba(255,255,255,0.014) 1px, transparent 1px, transparent 4px),
     var(--glass);
   border-radius:16px;padding:18px;border:1px solid var(--glass-brd);
-  backdrop-filter:blur(16px) saturate(1.15);-webkit-backdrop-filter:blur(16px) saturate(1.15);
+  /* PERFORMA: backdrop-filter dihilangkan juga di sini, sama alasannya
+     seperti .card -- kartu chart ini juga muncul beberapa kali per
+     halaman (Main Dashboard, Dashboard), jadi tetap berat kalau blur. */
   box-shadow:
     0 20px 50px -30px rgba(0,0,0,0.7),
     0 0 30px -14px rgba(90,168,255,0.4),

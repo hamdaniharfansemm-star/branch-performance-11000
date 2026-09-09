@@ -352,6 +352,19 @@ input[type=text], input[type=number], input[type=date], input[type=password], in
 }
 textarea{resize:vertical;min-height:64px;}
 input:focus, select:focus, textarea:focus{border-color:var(--gold-500);box-shadow:0 0 0 3px rgba(244,201,93,0.15);}
+/* Gaya khusus kolom login -- tipis, garis bawah saja (bukan kotak penuh),
+   supaya kesannya lebih minimal & elegan, senada dengan referensi desain
+   login premium yang diminta. */
+.login-card input[type=text], .login-card input[type=password], .login-card input[type=email]{
+  background:transparent;border:none;border-bottom:1.5px solid rgba(255,255,255,0.16);
+  border-radius:0;padding:10px 4px;font-size:14px;
+  transition:border-color .2s;
+}
+.login-card .input-icon-wrap input{padding-left:34px;}
+.login-card input[type=text]:focus, .login-card input[type=password]:focus, .login-card input[type=email]:focus{
+  border-bottom-color:var(--gold-400);box-shadow:none;
+}
+.login-card .field label{text-align:left;display:block;}
 /* Hilangkan panah spinner naik/turun di semua kolom angka — cukup ketik
    langsung, tanpa tombol atas-bawah (permintaan: edit nominal cukup tulis). */
 input[type=number]::-webkit-outer-spin-button,
@@ -549,7 +562,7 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
    ============================================================ */
 .login-screen{
   position:fixed;inset:0;z-index:500;
-  display:flex;align-items:center;justify-content:center;
+  display:flex;align-items:stretch;justify-content:center;
   background:
     radial-gradient(1000px 650px at 20% 10%, rgba(47,111,214,0.30), transparent 60%),
     radial-gradient(800px 550px at 85% 90%, rgba(62,230,242,0.14), transparent 55%),
@@ -560,9 +573,36 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
     radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1.4px),
     linear-gradient(160deg, #030710, #0a1830 55%, #040911);
   background-size:auto, auto, auto, 26px 26px, auto;
-  padding:20px;
   animation:loginFade .18s ease;
+  overflow:hidden;
 }
+/* Panel visual kiri -- hanya tampil di layar lebar (desktop/tablet), supaya
+   halaman login benar-benar terasa "penuh" & bermakna di kedua sisi, bukan
+   cuma satu kartu kecil mengambang di tengah layar kosong. Di HP (mobile),
+   panel ini otomatis disembunyikan -- form login tetap jadi satu-satunya
+   fokus, seperti sebelumnya. */
+.login-visual-panel{display:none;}
+@media(min-width:900px){
+  .login-visual-panel{
+    display:flex;flex-direction:column;justify-content:flex-end;
+    position:relative;flex:1.1;min-width:0;overflow:hidden;
+    padding:60px 56px;
+    background:
+      linear-gradient(155deg, rgba(10,24,48,0.4), rgba(3,7,16,0.75)),
+      linear-gradient(200deg, #0b1830, #050b16 70%);
+    border-right:1px solid rgba(244,201,93,0.14);
+  }
+  .login-card{flex:0.9;max-width:520px;}
+}
+.lvp-shape{position:absolute;border:1.5px solid rgba(244,201,93,0.28);border-radius:2px;}
+.lvp-1{width:520px;height:520px;right:-180px;top:-160px;transform:rotate(45deg);border-color:rgba(244,201,93,0.22);}
+.lvp-2{width:380px;height:380px;right:-120px;top:-60px;transform:rotate(45deg);border-color:rgba(90,168,255,0.18);}
+.lvp-3{width:240px;height:240px;right:-60px;top:20px;transform:rotate(45deg);border-color:rgba(244,201,93,0.35);}
+.lvp-chart{position:relative;z-index:1;margin-bottom:28px;opacity:0.9;}
+.lvp-text{position:relative;z-index:1;}
+.lvp-kicker{font-size:11px;letter-spacing:2px;color:var(--gold-300);font-weight:800;margin-bottom:14px;}
+.lvp-text h2{font-family:var(--ff-display);font-size:30px;line-height:1.28;color:#fff;font-weight:700;margin:0 0 14px;}
+.lvp-text p{font-size:13.5px;color:var(--ink-300);line-height:1.6;max-width:400px;margin:0;}
 @keyframes loginFade{from{opacity:0;}to{opacity:1;}}
 /* saat login diproses: bekukan semua animasi dekoratif layar login agar
    perpindahan ke dashboard tidak perlu meng-composite dua layar beranimasi
@@ -606,18 +646,23 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
 
 .login-card{
   position:relative;z-index:2;width:100%;max-width:400px;
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;
+  margin:0 auto;
+}
+#loginCard > div{width:100%;}
+.login-card-inner{
+  width:100%;
   background:
-    repeating-linear-gradient(0deg, rgba(255,255,255,0.014) 0px, rgba(255,255,255,0.014) 1px, transparent 1px, transparent 4px),
-    linear-gradient(165deg, rgba(18,38,62,0.86), rgba(5,12,22,0.94));
-  border:1px solid rgba(235,240,248,0.2);border-radius:22px;
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.01) 0px, rgba(255,255,255,0.01) 1px, transparent 1px, transparent 4px),
+    linear-gradient(165deg, rgba(18,38,62,0.5), rgba(5,12,22,0.62));
+  border:1px solid rgba(235,240,248,0.09);border-radius:20px;
   padding:40px 34px 30px;text-align:center;
   box-shadow:
-    0 40px 90px -30px rgba(0,0,0,0.9),
-    0 4px 10px -2px rgba(0,0,0,0.5),
-    0 0 60px -15px rgba(90,168,255,0.22),
-    inset 0 2px 0 rgba(255,255,255,0.35),
-    inset 0 -2px 0 rgba(0,0,0,0.5);
-  backdrop-filter:blur(14px);
+    0 30px 70px -30px rgba(0,0,0,0.7),
+    0 0 40px -18px rgba(90,168,255,0.16),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+  backdrop-filter:blur(18px);
   animation:cardRise .3s cubic-bezier(.2,.9,.2,1);
 }
 @keyframes cardRise{from{opacity:0;transform:translateY(24px) scale(0.97);}to{opacity:1;transform:translateY(0) scale(1);}}
@@ -738,7 +783,27 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
     <div class="login-grid"></div>
     <div class="login-orbit o1"></div><div class="login-orbit o2"></div>
   </div>
+  <div class="login-visual-panel">
+    <div class="lvp-shape lvp-1"></div>
+    <div class="lvp-shape lvp-2"></div>
+    <div class="lvp-shape lvp-3"></div>
+    <div class="lvp-chart">
+      <svg viewBox="0 0 260 90" width="100%" preserveAspectRatio="none">
+        <defs><linearGradient id="lvpLine" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#f4c95d" stop-opacity="0.9"/>
+          <stop offset="100%" stop-color="#5aa8ff" stop-opacity="0.9"/>
+        </linearGradient></defs>
+        <path d="M0,70 C30,55 45,75 70,50 C95,25 120,60 150,35 C180,10 210,45 260,15" fill="none" stroke="url(#lvpLine)" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="lvp-text">
+      <div class="lvp-kicker">BANK MANDIRI &middot; PERFORMANCE SUITE</div>
+      <h2>Kelola performa cabang<br>dengan presisi &amp; percaya diri.</h2>
+      <p>Akuisisi, layanan, dan pipeline dana — semuanya dalam satu dashboard yang dirancang untuk kecepatan kerja perbankan profesional.</p>
+    </div>
+  </div>
   <div class="login-card" id="loginCard">
+   <div class="login-card-inner">
     <div id="autoLoginOverlay" style="display:none;padding:30px 0;text-align:center">
       <div class="spinner-ring"></div>
       <p style="margin-top:16px;color:var(--ink-200);font-size:13px;font-weight:700">Menghubungkan ke server...</p>
@@ -770,7 +835,7 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
         <label>Login</label>
         <div class="input-icon-wrap">
           <span class="input-icon">👤</span>
-          <input type="text" id="loginNIP" inputmode="numeric" placeholder="Masukkan NIP Anda" autocomplete="off" style="padding-left:38px">
+          <input type="text" id="loginNIP" inputmode="numeric" placeholder="Masukkan NIP Anda" autocomplete="off">
         </div>
       </div>
       <div id="loginStep2"></div>
@@ -778,6 +843,7 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
     </form>
     <p class="login-foot" id="loginFootHint">Tulis NIP Anda untuk masuk. Akses Admin otomatis aktif untuk NIP terdaftar.</p>
     </div>
+   </div>
   </div>
 </div>
 
@@ -7958,7 +8024,7 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
       if(auth && auth.passwordHash){
         loginStage = "password";
         document.getElementById("loginStep2").innerHTML = `
-          <div class="field"><label>Password</label><input type="password" id="loginPassword" autocomplete="current-password"></div>
+          <div class="field"><label>Password</label><div class="input-icon-wrap"><span class="input-icon">🔑</span><input type="password" id="loginPassword" autocomplete="current-password"></div></div>
           <p style="text-align:right;margin:-6px 0 4px"><a href="#" id="forgotPasswordLink" style="color:var(--gold-300);font-size:12px">Lupa password?</a></p>
         `;
         document.getElementById("loginFootHint").textContent = `NIP ${nip} (${roleLabel}) — masukkan password.`;
@@ -7970,9 +8036,9 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
         loginStage = "setup";
         document.getElementById("loginStep2").innerHTML = `
           <p class="hint" style="margin:6px 0 10px">Ini pertama kalinya NIP ini masuk. Buat email &amp; password sendiri untuk mengamankan akun Anda — bebas, terserah Anda.</p>
-          <div class="field"><label>Email (untuk reset password)</label><input type="email" id="setupEmail"></div>
-          <div class="field"><label>Buat Password (min. 6 karakter)</label><input type="password" id="setupPassword" minlength="6"></div>
-          <div class="field"><label>Ulangi Password</label><input type="password" id="setupPasswordConfirm" minlength="6"></div>
+          <div class="field"><label>Email (untuk reset password)</label><div class="input-icon-wrap"><span class="input-icon">✉️</span><input type="email" id="setupEmail"></div></div>
+          <div class="field"><label>Buat Password (min. 6 karakter)</label><div class="input-icon-wrap"><span class="input-icon">🔑</span><input type="password" id="setupPassword" minlength="6"></div></div>
+          <div class="field"><label>Ulangi Password</label><div class="input-icon-wrap"><span class="input-icon">🔑</span><input type="password" id="setupPasswordConfirm" minlength="6"></div></div>
         `;
         document.getElementById("loginFootHint").textContent = `Ini pertama kalinya NIP ini login (${roleLabel}).`;
         btn.textContent = "💾 Simpan & Masuk";

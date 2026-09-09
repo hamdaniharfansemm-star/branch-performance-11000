@@ -209,7 +209,17 @@ nav.tabs button.active::after{
     0 0 26px -18px rgba(90,168,255,0.35),
     inset 0 1px 0 rgba(255,255,255,0.07);
   transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
-  animation:cardRise .38s cubic-bezier(.22,.61,.36,1) both, cardGlowPulse 4.5s ease-in-out infinite;
+  animation:cardRise .38s cubic-bezier(.22,.61,.36,1) both;
+  /* PERFORMA: sebelumnya SETIAP kartu (bisa puluhan per halaman, mis.
+     Riwayat/Main Dashboard) punya animasi box-shadow berdenyut terus-
+     menerus -- ini BERAT untuk GPU/CPU perangkat (terutama HP), dan
+     inilah salah satu penyebab nyata "loading terasa lama" yang dilaporkan
+     (bukan jaringan lambat, tapi rendering yang berat). Sekarang cahaya di
+     tepi kartu tetap ada tapi STATIS (tidak berdenyut) -- kesan "kaca
+     bercahaya" tetap terasa tanpa membebani perangkat. Animasi berdenyut
+     tetap dipakai, tapi HANYA untuk elemen yang jumlahnya sedikit (tab
+     aktif, chip aktif, kartu login) supaya tetap terasa "hidup" tanpa
+     memberatkan halaman yang isinya banyak kartu sekaligus. */
 }
 /* Animasi masuk halus untuk kartu -- mengalir dari sedikit di bawah +
    transparan menuju posisi & opacity normal, memberi kesan "hidup" seperti
@@ -563,7 +573,17 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
     0 20px 50px -30px rgba(0,0,0,0.7),
     0 0 30px -14px rgba(90,168,255,0.4),
     inset 0 1px 0 rgba(255,255,255,0.08);
-  animation:cardRise .38s cubic-bezier(.22,.61,.36,1) both, cardGlowPulse 4.5s ease-in-out infinite;
+  animation:cardRise .38s cubic-bezier(.22,.61,.36,1) both;
+  /* PERFORMA: sebelumnya SETIAP kartu (bisa puluhan per halaman, mis.
+     Riwayat/Main Dashboard) punya animasi box-shadow berdenyut terus-
+     menerus -- ini BERAT untuk GPU/CPU perangkat (terutama HP), dan
+     inilah salah satu penyebab nyata "loading terasa lama" yang dilaporkan
+     (bukan jaringan lambat, tapi rendering yang berat). Sekarang cahaya di
+     tepi kartu tetap ada tapi STATIS (tidak berdenyut) -- kesan "kaca
+     bercahaya" tetap terasa tanpa membebani perangkat. Animasi berdenyut
+     tetap dipakai, tapi HANYA untuk elemen yang jumlahnya sedikit (tab
+     aktif, chip aktif, kartu login) supaya tetap terasa "hidup" tanpa
+     memberatkan halaman yang isinya banyak kartu sekaligus. */
 }
 .chart-card-light h3.sub{color:var(--gold-300);}
 .chart-card-light .chart-tip{background:var(--navy-950);border-color:var(--gold-500);}
@@ -2300,6 +2320,21 @@ document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>setTab(b.d
   scroller.addEventListener("scroll", updateArrows);
   window.addEventListener("resize", updateArrows);
   updateArrows();
+  // PENTING: font kustom (Google Fonts) dimuat SECARA ASINKRON -- begitu
+  // font itu selesai dimuat, lebar teks tab BISA BERUBAH SEDIKIT (font
+  // pengganti sementara vs font asli biasanya beda lebar), yang mengubah
+  // scrollWidth TANPA memicu event 'resize' atau 'scroll' apa pun. Ini
+  // penyebab tombol panah kadang tampil/tidak tampil secara tidak
+  // konsisten (tergantung kapan font selesai dimuat relatif terhadap
+  // pengecekan pertama). Cek ulang begitu semua font benar-benar siap.
+  if(document.fonts && document.fonts.ready){
+    document.fonts.ready.then(updateArrows).catch(()=>{});
+  }
+  // Jaring pengaman tambahan: cek ulang sesaat setelah beban awal selesai,
+  // untuk menangkap perubahan ukuran lain (mis. scrollbar muncul/hilang)
+  // yang juga tidak selalu memicu event resize.
+  setTimeout(updateArrows, 500);
+  setTimeout(updateArrows, 1500);
 
   let isDown = false, startX = 0, startScroll = 0, moved = false;
   scroller.addEventListener("mousedown", (e)=>{
@@ -2783,10 +2818,10 @@ function drawProductDonutChart(prodStats){
     const x4 = cx + rInner*Math.cos(startRad), y4 = cy + rInner*Math.sin(startRad);
     const largeArc = sweep>180 ? 1 : 0;
     const color = COLORS[i%COLORS.length];
-    arcs += `<path d="M ${x1},${y1} A ${rOuter},${rOuter} 0 ${largeArc} 1 ${x2},${y2} L ${x3},${y3} A ${rInner},${rInner} 0 ${largeArc} 0 ${x4},${y4} Z" fill="${color}" stroke="var(--navy-900,#0b1e3a)" stroke-width="1.5"><title>${d.product}: ${fmtNumId(d.achieved)} (${(pct*100).toFixed(1)}%)</title></path>`;
+    arcs += `<path d="M ${x1},${y1} A ${rOuter},${rOuter} 0 ${largeArc} 1 ${x2},${y2} L ${x3},${y3} A ${rInner},${rInner} 0 ${largeArc} 0 ${x4},${y4} Z" fill="${color}" stroke="var(--navy-900,#0b1e3a)" stroke-width="1.5" style="filter:drop-shadow(0 0 6px ${color}99)"><title>${d.product}: ${fmtNumId(d.achieved)} (${(pct*100).toFixed(1)}%)</title></path>`;
     angle += sweep;
     return `<span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-200)">
-      <span style="width:9px;height:9px;border-radius:50%;background:${color};flex-shrink:0"></span>
+      <span style="width:9px;height:9px;border-radius:50%;background:${color};flex-shrink:0;box-shadow:0 0 7px 1px ${color}bb"></span>
       ${d.product} <b style="color:#fff">${(pct*100).toFixed(0)}%</b>
     </span>`;
   }).join("");
@@ -2819,8 +2854,8 @@ function drawAnnualProductChart(prodStats){
     const cx = padL + groupW*(i+0.5);
     const hAch = (d.achieved/maxV)*chH, yAch = padT+chH-hAch;
     const hTar = (d.target/maxV)*chH, yTar = padT+chH-hTar;
-    bars += `<rect x="${cx-bw-2}" y="${yAch}" width="${bw}" height="${hAch}" rx="4" fill="#5aa8ff" style="filter:drop-shadow(0 0 6px rgba(90,168,255,0.7))"/>`;
-    bars += `<rect x="${cx+2}" y="${yTar}" width="${bw}" height="${hTar}" rx="4" fill="rgba(244,201,93,0.5)"/>`;
+    bars += `<rect x="${cx-bw-2}" y="${yAch}" width="${bw}" height="${hAch}" rx="4" fill="url(#barAchGrad)" style="filter:drop-shadow(0 0 9px rgba(90,168,255,0.95)) drop-shadow(0 0 18px rgba(90,168,255,0.5))"/>`;
+    bars += `<rect x="${cx+2}" y="${yTar}" width="${bw}" height="${hTar}" rx="4" fill="url(#barTarGrad)" style="filter:drop-shadow(0 0 7px rgba(244,201,93,0.7))"/>`;
     // Angka jelas di atas setiap batang -- posisi selalu SEDIKIT DI ATAS
     // ujung batang, supaya tidak tumpang tindih dengan batangnya sendiri.
     if(d.achieved>0) valueLabels += `<text x="${cx-bw/2-2}" y="${yAch-5}" text-anchor="middle" font-size="9" font-weight="800" fill="#8fc4ff">${fmtNumId(d.achieved)}</text>`;
@@ -2833,7 +2868,19 @@ function drawAnnualProductChart(prodStats){
       <span><span style="display:inline-block;width:10px;height:10px;background:#5aa8ff;border-radius:2px;margin-right:4px"></span>Tercapai</span>
       <span><span style="display:inline-block;width:10px;height:10px;background:rgba(244,201,93,0.5);border-radius:2px;margin-right:4px"></span>Target</span>
     </div>
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible">${grid}${bars}${valueLabels}${labels}</svg>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible">
+      <defs>
+        <linearGradient id="barAchGrad" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stop-color="#2f7fe0"/>
+          <stop offset="100%" stop-color="#8fc4ff"/>
+        </linearGradient>
+        <linearGradient id="barTarGrad" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stop-color="rgba(190,140,20,0.55)"/>
+          <stop offset="100%" stop-color="rgba(255,224,140,0.75)"/>
+        </linearGradient>
+      </defs>
+      ${grid}${bars}${valueLabels}${labels}
+    </svg>
   `;
 }
 

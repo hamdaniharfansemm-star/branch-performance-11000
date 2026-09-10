@@ -941,6 +941,7 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
         <button id="roleAdmin">Admin</button>
       </div>
       <button class="iconbtn" id="pagePdfBtn" title="Unduh PDF khusus halaman ini saja" style="width:auto;padding:0 12px;gap:6px;font-size:12.5px;font-weight:800;white-space:nowrap">📄 Halaman Ini</button>
+      <button class="iconbtn" id="taskBellBtn" title="Tugas menunggu" style="position:relative;display:none">🔔<span id="taskBellBadge" style="position:absolute;top:-4px;right:-4px;background:var(--danger);color:#fff;font-size:10px;font-weight:800;border-radius:10px;min-width:18px;height:18px;display:flex;align-items:center;justify-content:center;padding:0 4px;box-shadow:0 0 8px rgba(255,107,107,0.8)"></span></button>
       <button class="iconbtn" id="musicBtn" title="Musik semangat">🔊</button>
       <button class="iconbtn" id="logoutBtn" title="Keluar">🚪</button>
     </div>
@@ -1963,6 +1964,7 @@ async function loadMonthData(){
   if(pl !== null) state.pipeline = pl;
   if(mk !== null) state.marketing = mk;
   rebuildIndex();
+  updateTaskBell();
 }
 /* PERCEPAT LOGIN: versi "penting saja" dari loadMonthData — dipakai KHUSUS
    saat login pertama kali, supaya Dashboard bisa tampil secepat mungkin.
@@ -1992,6 +1994,7 @@ function loadNonEssentialDataInBackground(){
   ]).then(([ld, inf])=>{
     if(ld !== null) state.leads = ld;
     if(inf !== null) state.info = inf;
+    updateTaskBell();
     // Kalau pengguna KEBETULAN sedang membuka tab Leads/Informasi saat data
     // ini baru selesai dimuat, gambar ulang supaya langsung terlihat --
     // tanpa ini, data baru ada di memori tapi layar belum ikut berubah
@@ -4058,13 +4061,12 @@ function renderLeadsSubTab(container){
     </div>
     ` : ``}
     <h2 class="sec">Daftar Leads <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">${state.leads.length} total</span></h2>
-    ${!isAdmin ? `
     <div class="field" style="max-width:340px"><label>Nama Saya (untuk melihat tugas Anda)</label>
       <select id="leadsMyNameSelect"><option value="">-- Pilih nama Anda --</option>${CFG.employees.map(e=>`<option value="${e.name}">${e.name} (${e.team})</option>`).join("")}</select>
-    </div>` : ""}
+    </div>
     <div class="chip-row" id="leadsChips">
       <div class="chip active" data-scope="all">🌐 Semua Produk</div>
-      ${!isAdmin ? `<div class="chip" data-scope="mytask">🎯 Tugas Saya</div>` : ""}
+      <div class="chip" data-scope="mytask">🎯 Tugas Saya</div>
       ${CFG.products.map(p=>`<div class="chip" data-scope="${p}">${p}</div>`).join("")}
     </div>
     <div class="card glow"><div id="leadsList"></div></div>
@@ -4087,7 +4089,8 @@ function renderLeadsSubTab(container){
       if(state.tab !== "leads") return; // pengguna sudah pindah tab
       drawLeadsList("all");
     };
-  } else {
+  }
+  {
     const myNameSel = document.getElementById("leadsMyNameSelect");
     const savedName = (CFG.userAuth && CFG.userAuth[state.nip] && CFG.userAuth[state.nip].employeeName) || "";
     if(savedName) myNameSel.value = savedName;
@@ -4100,6 +4103,11 @@ function renderLeadsSubTab(container){
         if(!cfg.userAuth[state.nip]) return;
         cfg.userAuth[state.nip].employeeName = chosen;
       });
+      // Perbarui lagi lonceng SETELAH penyimpanan selesai -- supaya kalau
+      // pengguna langsung pindah tab (bukan tetap di Leads), lonceng tetap
+      // menunjukkan status yang benar (dropdown Leads sudah tidak lagi
+      // "aktif di layar" begitu tab lain dibuka).
+      updateTaskBell();
     };
   }
   document.querySelectorAll("#leadsChips .chip").forEach(c=>{
@@ -4333,12 +4341,20 @@ function waLink(contact){
   return `https://wa.me/${num}`;
 }
 function drawLeadsList(scope){
+  updateTaskBell();
   const box = document.getElementById("leadsList");
   const isAdmin = state.role === "admin";
   const priority = Array.isArray(CFG.leadsPriorityProducts) ? CFG.leadsPriorityProducts : [];
   const priorityIndex = {}; priority.forEach((p,i)=>{ priorityIndex[p.product] = i; });
   const urgentSet = new Set(priority.filter(p=>p.urgent).map(p=>p.product));
-  const myName = (CFG.userAuth && CFG.userAuth[state.nip] && CFG.userAuth[state.nip].employeeName) || "";
+  // PENTING (bug diperbaiki): JANGAN baca nama dari CFG.userAuth di sini --
+  // penyimpanan pilihan nama ke server itu ASINKRON (perlu waktu), jadi
+  // kalau dibaca dari situ, ada jeda singkat di mana nama tampak "kosong"
+  // walau sudah dipilih di dropdown -- inilah penyebab bug "Tugas Saya"
+  // yang tidak muncul meski nama sudah dipilih. Selalu ambil LANGSUNG dari
+  // pilihan dropdown yang sedang aktif di layar (sumber paling akurat).
+  const nameSelNow = document.getElementById("leadsMyNameSelect");
+  const myName = nameSelNow ? nameSelNow.value : ((CFG.userAuth && CFG.userAuth[state.nip] && CFG.userAuth[state.nip].employeeName) || "");
   const list = [...state.leads]
     .filter(l=> scope==="all" || (scope==="mytask" ? l.assignedTo===myName : l.product===scope))
     .sort((a,b)=>{
@@ -6609,6 +6625,27 @@ const SECTION_ORDER_CFG_KEY = {
   layanan: "layananSectionOrder",
   maindash: "maindashSectionOrder",
 };
+/* Lonceng notifikasi tugas -- muncul di header, menunjukkan berapa lead
+   yang ditugaskan ke SAYA (karyawan yang sedang login) dan BELUM
+   di-follow-up. Dipanggil ulang setiap kali data leads berubah (upload,
+   ubah, follow-up) supaya jumlahnya selalu akurat. */
+function updateTaskBell(){
+  const btn = document.getElementById("taskBellBtn");
+  const badge = document.getElementById("taskBellBadge");
+  if(!btn || !badge) return;
+  // Sama seperti drawLeadsList: utamakan nilai dropdown yang SEDANG aktif
+  // di layar (kalau halaman Leads sedang terbuka) supaya tidak kena jeda
+  // penyimpanan asinkron ke server -- baru pakai CFG.userAuth sebagai
+  // cadangan kalau dropdown itu tidak sedang tampil.
+  const nameSelNow = document.getElementById("leadsMyNameSelect");
+  const myName = nameSelNow ? nameSelNow.value : ((CFG.userAuth && CFG.userAuth[state.nip] && CFG.userAuth[state.nip].employeeName) || "");
+  if(!myName || !Array.isArray(state.leads)){ btn.style.display = "none"; return; }
+  const pendingCount = state.leads.filter(l=>l.assignedTo===myName && !l.followedBy).length;
+  if(pendingCount<=0){ btn.style.display = "none"; return; }
+  btn.style.display = "inline-flex";
+  badge.textContent = pendingCount>99 ? "99+" : String(pendingCount);
+  btn.title = `${pendingCount} tugas Leads menunggu Anda`;
+}
 function drawLeadsPriorityList(){
   const box = document.getElementById("leadsPriorityList");
   if(!box) return;
@@ -7014,6 +7051,13 @@ yearSelect.onchange = onPeriodChange;
 
 document.getElementById("logoutBtn").onclick = ()=>{ doLogout(); };
 document.getElementById("pagePdfBtn").onclick = downloadCurrentPagePDF;
+document.getElementById("taskBellBtn").onclick = ()=>{
+  setTab("leads");
+  setTimeout(()=>{
+    const mytaskChip = document.querySelector('#leadsChips [data-scope="mytask"]');
+    if(mytaskChip) mytaskChip.click();
+  }, 150);
+};
 
 document.getElementById("roleKaryawan").onclick = ()=>{
   state.role = "karyawan";

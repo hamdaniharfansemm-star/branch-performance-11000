@@ -1973,33 +1973,41 @@ async function loadMonthData(){
    sesaat setelah login selesai, jadi biasanya sudah siap begitu pengguna
    benar-benar membuka tab Leads/Informasi, tanpa ikut memperlambat login. */
 async function loadEssentialMonthData(){
-  const [r,l,p,pl,mk] = await Promise.all([
+  const [r,l,p,pl,mk,ld] = await Promise.all([
     safeLoadList(keyReports(state.month)),
     safeLoadList(keyLayanan(state.month)),
     safeLoadList(keyPenilaian(state.month)),
     safeLoadPipelineForMonth(state.month),
     safeLoadMarketingForMonth(state.month),
+    // PENTING: Leads DIPINDAHKAN ke sini (bukan lagi di latar belakang
+    // terpisah) -- lonceng notifikasi tugas ada di HEADER, tampil di
+    // SEMUA halaman, jadi harus akurat SEGERA setelah login selesai,
+    // bukan menunggu beberapa detik lagi di belakang layar (yang membuat
+    // lonceng terasa "baru muncul kalau buka Leads dulu" -- sebenarnya
+    // cuma menunggu proses latar belakang yang belum selesai).
+    safeLoadList(KEY_LEADS),
   ]);
   if(r !== null) state.reports = r;
   if(l !== null) state.layanan = l;
   if(p !== null) state.penilaian = p;
   if(pl !== null) state.pipeline = pl;
   if(mk !== null) state.marketing = mk;
+  if(ld !== null) state.leads = ld;
   rebuildIndex();
+  updateTaskBell();
 }
 function loadNonEssentialDataInBackground(){
+  // Info TETAP dimuat belakangan (tidak memengaruhi header/lonceng),
+  // beda dengan Leads yang sekarang sudah dipindah ke pemuatan penting.
   Promise.all([
-    safeLoadList(KEY_LEADS),
     safeLoadList(KEY_INFO),
-  ]).then(([ld, inf])=>{
-    if(ld !== null) state.leads = ld;
+  ]).then(([inf])=>{
     if(inf !== null) state.info = inf;
-    updateTaskBell();
-    // Kalau pengguna KEBETULAN sedang membuka tab Leads/Informasi saat data
-    // ini baru selesai dimuat, gambar ulang supaya langsung terlihat --
-    // tanpa ini, data baru ada di memori tapi layar belum ikut berubah
-    // sampai pengguna pindah tab lalu kembali lagi.
-    if(state.tab === "leads" || state.tab === "info") render();
+    // Kalau pengguna KEBETULAN sedang membuka tab Informasi saat data ini
+    // baru selesai dimuat, gambar ulang supaya langsung terlihat -- tanpa
+    // ini, data baru ada di memori tapi layar belum ikut berubah sampai
+    // pengguna pindah tab lalu kembali lagi.
+    if(state.tab === "info") render();
   }).catch(()=>{});
 }
 
@@ -8070,6 +8078,7 @@ async function doLoginFlow(nip, recordActivityNip){
     KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`,
     mMonth, `${mMonth}::c0`,
     KEY_MARKETING_LEGACY, `${KEY_MARKETING_LEGACY}::c0`,
+    KEY_LEADS, `${KEY_LEADS}::c0`,
   ]);
   // PERCEPAT: catat aktivitas login SETELAH batch di atas (bukan sebelum
   // doLoginFlow dipanggil seperti sebelumnya) — supaya proses ini ikut

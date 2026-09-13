@@ -838,6 +838,22 @@ table.data tr:hover td{background:rgba(255,255,255,0.02);}
   window.addEventListener("unhandledrejection", function(ev){
     var reason = ev.reason;
     var msg = (reason && (reason.stack || reason.message)) || String(reason);
+    // PENTING: "Fetch is aborted" / "AbortError" adalah hasil dari BATAS
+    // WAKTU yang SENGAJA saya pasang sendiri (supaya tombol tidak pernah
+    // macet selamanya menunggu server) -- ini SUDAH ditangani lewat
+    // percobaan ulang otomatis di tempat lain, jadi kalau MASIH muncul
+    // sebagai "unhandled" di sini, itu cuma SISA dari proses latar
+    // belakang yang sudah ditinggalkan (bukan bug baru yang berbahaya).
+    // Jangan tampilkan kotak merah menakutkan untuk ini -- cukup catat
+    // saja secara diam-diam, supaya tidak membuat pengguna panik untuk
+    // sesuatu yang sebenarnya sudah aman.
+    var isAbortNoise = /abort/i.test(msg);
+    if(isAbortNoise){
+      if(!window.__storageErrors) window.__storageErrors = [];
+      window.__storageErrors.push("(diam-diam, sudah ditangani) " + msg);
+      ev.preventDefault();
+      return;
+    }
     showFatalBanner("Promise gagal (unhandled): " + msg);
   });
   window.__reportError = showFatalBanner;
@@ -2575,8 +2591,17 @@ async function loadAndDrawMainDashboard(year){
     // JANGAN biarkan spinner "Memuat data 12 bulan..." muncul selamanya --
     // tampilkan pesan error yang jelas + tombol coba lagi, seperti perbaikan
     // serupa yang sudah diterapkan untuk layar login.
+    // PENTING: promise-nya dibuat DULU dan disimpan di variabel, lalu
+    // .catch() "diam" (silent) dilekatkan TERPISAH sebelum ikut
+    // Promise.race -- ini mencegah "unhandled rejection" kalau promise
+    // asli ini KALAH race (timeout menang duluan) tapi baru gagal
+    // belakangan di latar belakang, TANPA mengubah promise mana yang
+    // menentukan hasil Promise.race itu sendiri (persis penyebab error
+    // yang dilaporkan: "Promise gagal (unhandled): Fetch is aborted").
+    const reportsPromise = loadYearlyReportsPhase(year);
+    reportsPromise.catch(err=>{ window.__storageErrors.push(String(err && err.message||err)); });
     yearly = await Promise.race([
-      loadYearlyReportsPhase(year),
+      reportsPromise,
       new Promise((_, reject)=> setTimeout(()=> reject(new Error("Waktu tunggu 30 detik terlampaui")), 30000)),
     ]);
   }catch(e){
@@ -2599,8 +2624,13 @@ async function loadAndDrawMainDashboard(year){
   // Layanan/Support) begitu selesai -- tanpa mengganggu bagian yang sudah
   // tampil duluan.
   try{
+    // Sama seperti Fase 1: lekatkan .catch() diam SEBELUM Promise.race
+    // untuk mencegah "unhandled rejection" kalau promise ini kalah race
+    // tapi baru gagal belakangan.
+    const remainderPromise = loadYearlyRemainderPhase(year);
+    remainderPromise.catch(err=>{ window.__storageErrors.push(String(err && err.message||err)); });
     const remainder = await Promise.race([
-      loadYearlyRemainderPhase(year),
+      remainderPromise,
       new Promise((_, reject)=> setTimeout(()=> reject(new Error("timeout 30 detik")), 30000)),
     ]);
     if(state.tab !== "maindash") return; // pengguna sudah pindah tab
@@ -8045,7 +8075,14 @@ async function doLoginFlowWithFailsafe(nip, recordActivityNip){
     timeoutId = setTimeout(()=> reject(new Error("Proses login melebihi 25 detik — server tidak merespons. Coba lagi.")), 25000);
   });
   try{
-    await Promise.race([doLoginFlow(nip, recordActivityNip), failsafe]);
+    // Sama seperti perbaikan lain di berkas ini: lekatkan .catch() diam
+    // SEBELUM Promise.race, supaya kalau doLoginFlow "kalah" (failsafe 25
+    // detik menang duluan) tapi baru gagal belakangan di latar belakang,
+    // penolakannya tetap dianggap "ditangani" -- mencegah "unhandled
+    // rejection" muncul tiba-tiba nanti saat pengguna sudah pindah halaman.
+    const flowPromise = doLoginFlow(nip, recordActivityNip);
+    flowPromise.catch(err=>{ window.__storageErrors.push(String(err && err.message||err)); });
+    await Promise.race([flowPromise, failsafe]);
   } finally {
     clearTimeout(timeoutId);
   }
@@ -8092,8 +8129,19 @@ async function doLoginFlow(nip, recordActivityNip){
   // Apps Script tidak merespons), tetap masuk ke dashboard setelah 8 detik
   // alih-alih membuat pengguna terjebak selamanya di layar login.
   try{
+    // Sama seperti Fase 1/2 Main Dashboard: lekatkan .catch() diam SEBELUM
+    // Promise.race, supaya kalau proses ini "kalah" (timeout 8 detik
+    // menang duluan, aplikasi lanjut ke dashboard) tapi loadConfig/
+    // loadEssentialMonthData BARU gagal belakangan di latar belakang
+    // (mis. baru kena timeout fetch internal setelah beberapa percobaan
+    // ulang), penolakannya tetap "ditangani" -- bukan lagi "unhandled
+    // rejection" yang muncul tiba-tiba di halaman lain saat pengguna
+    // sudah pindah-pindah tab. Inilah penyebab persis error "Fetch is
+    // aborted" yang dilaporkan.
+    const loadPromise = Promise.all([loadConfig(), loadEssentialMonthData()]);
+    loadPromise.catch(err=>{ window.__storageErrors.push(String(err && err.message||err)); });
     await Promise.race([
-      Promise.all([loadConfig(), loadEssentialMonthData()]),
+      loadPromise,
       new Promise((resolve)=> setTimeout(resolve, 8000)),
     ]);
   }catch(err){

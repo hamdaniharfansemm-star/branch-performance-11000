@@ -7567,12 +7567,17 @@ function pdfLeadsDetail(){
   const followed = state.leads.filter(l=>l.followedBy).length;
   p.paragraph(`Total Leads: ${state.leads.length} | Sudah ditindaklanjuti: ${followed} | Belum: ${state.leads.length-followed}`, {bold:true});
   p.setY(p.getY()+8);
-  const cols = [{label:"PRODUK",w:90},{label:"NAMA POTENSI",w:150},{label:"KONTAK",w:110},{label:"STATUS",w:100},{label:"TANGGAL",w:65}];
+  // Kolom "DITUGASKAN" ditambahkan supaya PDF menunjukkan dengan jelas
+  // siapa yang diberi tugas untuk setiap lead, bukan cuma status follow
+  // up-nya saja -- lebar kolom lain sedikit dirampingkan supaya tetap
+  // muat rapi dalam satu halaman.
+  const cols = [{label:"PRODUK",w:70},{label:"NAMA POTENSI",w:120},{label:"KONTAK",w:95},{label:"DITUGASKAN",w:100},{label:"STATUS",w:90},{label:"TANGGAL",w:60}];
   p.tableHeader(cols);
   if(!state.leads.length){ p.paragraph("Belum ada data leads.", {size:9, color:[130,130,130]}); }
   [...state.leads].sort((a,b)=>(b.uploadedAt||0)-(a.uploadedAt||0)).forEach((l,i)=>{
     const status = l.followedBy ? `Selesai (${l.followedBy})` : "Belum";
-    p.tableRow(cols, [l.product, l.name, l.contact, status, l.uploadedAt?new Date(l.uploadedAt).toLocaleDateString('id-ID'):"-"], {zebra:i%2===0});
+    const assignedTo = l.assignedTo || "Semua karyawan";
+    p.tableRow(cols, [l.product, l.name, l.contact, assignedTo, status, l.uploadedAt?new Date(l.uploadedAt).toLocaleDateString('id-ID'):"-"], {zebra:i%2===0});
   });
   p.finish(`Detail_Leads_${new Date().toISOString().slice(0,10)}.pdf`);
   toast("PDF detail Leads berhasil diunduh", "📄");

@@ -4226,10 +4226,15 @@ function renderLeadsSubTab(container){
       const assignedTo = document.getElementById("ld_assignedTo").value;
       if(!name || !contact){ toast("Lengkapi nama potensi & kontak", "⚠️"); return; }
       const newLead = {id:uid(), product, name, contact, assignedTo: assignedTo||null, uploadedAt:Date.now()};
-      await mutateAndSave(KEY_LEADS, "leads", (fresh)=>{ fresh.push(newLead); });
+      // PENTING (bug diperbaiki): sama seperti unggah Excel -- hasil
+      // penyimpanan sekarang diperiksa, supaya tidak menampilkan pesan
+      // "berhasil" palsu kalau ternyata gagal tersimpan ke server.
+      const saveOk = await mutateAndSave(KEY_LEADS, "leads", (fresh)=>{ fresh.push(newLead); });
+      if(!saveOk){ toast("Gagal menyimpan lead ke server, coba lagi", "⚠️"); return; }
       toast("Lead berhasil ditambahkan", "✅");
       playSound("bell");
       e.target.reset();
+      updateTaskBell();
       if(state.tab !== "leads") return; // pengguna sudah pindah tab
       drawLeadsList("all");
     };
@@ -4861,7 +4866,20 @@ async function handleLeadsUpload(){
       added++;
     });
     if(added===0){ toast("Tidak ada baris valid yang terbaca dari file", "⚠️"); return; }
-    await mutateAndSave(KEY_LEADS, "leads", (fresh)=>{ fresh.push(...newLeads); });
+    // PENTING (bug diperbaiki): sebelumnya hasil mutateAndSave (berhasil
+    // atau gagal) TIDAK PERNAH DICEK -- kode langsung menampilkan pesan
+    // "berhasil diunggah" TANPA MELIHAT apakah penyimpanan ke server
+    // benar-benar berhasil. Kalau penyimpanan gagal (mis. koneksi sempat
+    // bermasalah), pengguna tetap melihat pesan SUKSES padahal data TIDAK
+    // benar-benar tersimpan -- inilah penyebab "sudah upload tapi tidak
+    // ada update di daftar leads". Sekarang hasilnya diperiksa, dan kalau
+    // gagal, ditampilkan pesan gagal yang jujur (bukan sukses palsu).
+    const saveOk = await mutateAndSave(KEY_LEADS, "leads", (fresh)=>{ fresh.push(...newLeads); });
+    if(!saveOk){
+      toast("Gagal menyimpan leads ke server -- coba lagi", "⚠️");
+      if(box) box.innerHTML = `<p style="font-weight:700;color:var(--danger)">❌ Gagal menyimpan ke server. Data BELUM tersimpan -- coba unggah ulang.</p>`;
+      return;
+    }
     const assignedCount = newLeads.filter(l=>l.assignedTo).length;
     toast(`${added} leads berhasil diunggah`, "🎉");
     playSound("bell");
@@ -4874,6 +4892,7 @@ async function handleLeadsUpload(){
       }
       box.innerHTML = html;
     }
+    updateTaskBell();
     if(state.tab === "leads") drawLeadsList("all");
   }catch(err){
     toast("Gagal membaca file. Pastikan format Excel/CSV valid.", "⚠️");
@@ -7864,7 +7883,15 @@ function pdfLeadsDetail(){
   const cols = [{label:"PRODUK",w:70},{label:"NAMA POTENSI",w:120},{label:"KONTAK",w:95},{label:"DITUGASKAN",w:100},{label:"STATUS",w:90},{label:"TANGGAL",w:60}];
   p.tableHeader(cols);
   if(!state.leads.length){ p.paragraph("Belum ada data leads.", {size:9, color:[130,130,130]}); }
-  [...state.leads].sort((a,b)=>(b.uploadedAt||0)-(a.uploadedAt||0)).forEach((l,i)=>{
+  // Diurutkan berdasarkan NAMA KARYAWAN yang ditugaskan -- supaya di
+  // cetakan, lead untuk satu karyawan mengelompok jadi satu, memudahkan
+  // membagikan/mengecek per orang. Lead yang TIDAK ditugaskan ke siapa
+  // pun (terlihat semua karyawan) dikumpulkan di PALING BAWAH.
+  [...state.leads].sort((a,b)=>{
+    const an = a.assignedTo || "\uFFFF", bn = b.assignedTo || "\uFFFF"; // "\uFFFF" memastikan yang kosong selalu di akhir
+    if(an !== bn) return an.localeCompare(bn);
+    return (b.uploadedAt||0)-(a.uploadedAt||0);
+  }).forEach((l,i)=>{
     const status = l.followedBy ? `Selesai (${l.followedBy})` : "Belum";
     const assignedTo = l.assignedTo || "Semua karyawan";
     p.tableRow(cols, [l.product, l.name, l.contact, assignedTo, status, l.uploadedAt?new Date(l.uploadedAt).toLocaleDateString('id-ID'):"-"], {zebra:i%2===0});

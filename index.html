@@ -4791,13 +4791,24 @@ async function handleDeleteLeadsForProduct(){
   if(count===0){ toast(`Tidak ada lead produk ${product} untuk dihapus`, "ℹ️"); return; }
   if(!confirm(`Hapus SEMUA ${count} lead produk ${product}? Tindakan ini TIDAK BISA dibatalkan.`)) return;
   const btn = document.getElementById("ld_deleteProductBtn");
-  btn.disabled = true; btn.textContent = "⏳ Menghapus...";
+  btn.disabled = true;
+  // PENTING (perbaikan UX): tampilkan HITUNGAN WAKTU BERJALAN selama
+  // menunggu -- sebelumnya tombol cuma menampilkan "Menghapus..." diam
+  // tanpa berubah, membuat pengguna mengira aplikasi macet padahal
+  // sebenarnya SEDANG BEKERJA (proses ini AMAN, akan selalu selesai
+  // paling lama sekitar 30-50 detik kalau server sedang lambat -- lihat
+  // catatan di fetchRaw/saveRaw). Dengan angka detik yang terus
+  // berjalan, pengguna tahu ini masih berproses, bukan berhenti.
+  let elapsed = 0;
+  btn.textContent = `⏳ Menghapus... (${elapsed}d)`;
+  const tickTimer = setInterval(()=>{ elapsed++; btn.textContent = `⏳ Menghapus... (${elapsed}d)`; }, 1000);
   const ok = await mutateAndSave(KEY_LEADS, "leads", (fresh)=>{
     // splice dari belakang supaya index tidak bergeser saat menghapus banyak sekaligus
     for(let i=fresh.length-1; i>=0; i--){
       if(fresh[i].product===product) fresh.splice(i,1);
     }
   });
+  clearInterval(tickTimer);
   btn.disabled = false; btn.textContent = "🗑️ Hapus Semua Lead Produk Ini";
   if(!ok){ toast("Gagal menghapus, coba lagi", "⚠️"); return; }
   toast(`${count} lead produk ${product} berhasil dihapus`, "🗑️");

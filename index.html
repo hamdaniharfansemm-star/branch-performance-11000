@@ -4176,6 +4176,16 @@ function renderLeadsSubTab(container){
         </form>
       </div>
     </div>
+    <div class="card" style="border-color:var(--danger);margin-top:16px">
+      <h3 class="sub" style="color:var(--danger)">🗑️ Hapus Semua Leads per Produk</h3>
+      <p class="hint" style="margin-bottom:12px">Gunakan ini kalau mau mengganti data lead lama dengan yang baru (mis. sebelum unggah ulang) -- menghapus SEMUA lead untuk satu produk sekaligus, apa pun status follow up-nya. Tidak bisa dibatalkan.</p>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div class="field" style="margin:0;min-width:200px"><label>Produk</label>
+          <select id="ld_deleteProduct">${CFG.products.map(p=>`<option value="${p}">${p}</option>`).join("")}</select>
+        </div>
+        <button class="btn ghost sm" id="ld_deleteProductBtn" style="border-color:var(--danger);color:var(--danger)">🗑️ Hapus Semua Lead Produk Ini</button>
+      </div>
+    </div>
     ` : ``}
     ${isAdmin ? `
     <h2 class="sec">📊 Laporan per Produk <span class="line"></span></h2>
@@ -4206,6 +4216,7 @@ function renderLeadsSubTab(container){
   `;
   if(isAdmin){
     document.getElementById("leadsUploadBtn").onclick = handleLeadsUpload;
+    document.getElementById("ld_deleteProductBtn").onclick = handleDeleteLeadsForProduct;
     document.getElementById("leadsTemplateBtn").onclick = downloadLeadsTemplate;
     document.getElementById("leadForm").onsubmit = async (e)=>{
       e.preventDefault();
@@ -4770,6 +4781,29 @@ async function downloadLeadsTemplate(){
     console.error(err);
     toast("Gagal membuat template, coba lagi", "⚠️");
   }
+}
+/* Hapus SEMUA lead untuk satu produk sekaligus -- dipakai kalau Admin mau
+   mengganti data lead lama dengan yang baru (mis. sebelum unggah ulang
+   daftar CC terbaru). Minta konfirmasi dulu karena TIDAK BISA dibatalkan. */
+async function handleDeleteLeadsForProduct(){
+  const product = document.getElementById("ld_deleteProduct").value;
+  const count = state.leads.filter(l=>l.product===product).length;
+  if(count===0){ toast(`Tidak ada lead produk ${product} untuk dihapus`, "ℹ️"); return; }
+  if(!confirm(`Hapus SEMUA ${count} lead produk ${product}? Tindakan ini TIDAK BISA dibatalkan.`)) return;
+  const btn = document.getElementById("ld_deleteProductBtn");
+  btn.disabled = true; btn.textContent = "⏳ Menghapus...";
+  const ok = await mutateAndSave(KEY_LEADS, "leads", (fresh)=>{
+    // splice dari belakang supaya index tidak bergeser saat menghapus banyak sekaligus
+    for(let i=fresh.length-1; i>=0; i--){
+      if(fresh[i].product===product) fresh.splice(i,1);
+    }
+  });
+  btn.disabled = false; btn.textContent = "🗑️ Hapus Semua Lead Produk Ini";
+  if(!ok){ toast("Gagal menghapus, coba lagi", "⚠️"); return; }
+  toast(`${count} lead produk ${product} berhasil dihapus`, "🗑️");
+  updateTaskBell();
+  if(state.tab !== "leads") return; // pengguna sudah pindah tab
+  drawLeadsList("all");
 }
 async function handleLeadsUpload(){
   const fileInput = document.getElementById("leadsFile");

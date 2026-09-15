@@ -4117,6 +4117,22 @@ function renderLeadsSubTab(container){
       </div>
     </div>
     ` : ``}
+    ${isAdmin ? `
+    <h2 class="sec">📊 Laporan per Produk <span class="line"></span></h2>
+    <p class="hint" style="margin-bottom:16px">Laporan kinerja karyawan untuk SATU produk tertentu — hanya karyawan yang PUNYA target produk ini yang ditampilkan (yang tidak diberi target tidak ikut muncul). Bisa ditarik per rentang tanggal, bulan, atau tahun.</p>
+    <div class="card glow" style="margin-bottom:18px">
+      <div class="grid cols-3">
+        <div class="field"><label>Produk</label>
+          <select id="ppr_product">${CFG.products.map(p=>`<option value="${p}">${p}</option>`).join("")}</select>
+        </div>
+        <div class="field"><label>Dari Tanggal</label><input type="date" id="ppr_dari"></div>
+        <div class="field"><label>Sampai Tanggal</label><input type="date" id="ppr_sampai"></div>
+      </div>
+      <button class="btn primary" id="ppr_tarikBtn">🔍 Tarik Laporan</button>
+      <button class="btn ghost sm" id="ppr_pdfBtn" style="display:none;margin-left:8px">📄 Unduh PDF</button>
+      <div id="ppr_resultBox" style="margin-top:16px"></div>
+    </div>
+    ` : ``}
     <h2 class="sec">Daftar Leads <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">${state.leads.length} total</span></h2>
     <div class="field" style="max-width:340px"><label>Nama Saya (untuk melihat tugas Anda)</label>
       <select id="leadsMyNameSelect"><option value="">-- Pilih nama Anda --</option>${CFG.employees.map(e=>`<option value="${e.name}">${e.name} (${e.team})</option>`).join("")}</select>
@@ -4146,6 +4162,18 @@ function renderLeadsSubTab(container){
       if(state.tab !== "leads") return; // pengguna sudah pindah tab
       drawLeadsList("all");
     };
+    // ---- Laporan per Produk ----
+    const pprDari = document.getElementById("ppr_dari");
+    const pprSampai = document.getElementById("ppr_sampai");
+    // Default: rentang bulan yang sedang aktif (dari-sampai 1 bulan penuh),
+    // supaya Admin langsung dapat hasil begitu buka tanpa harus mengisi
+    // tanggal dulu -- tetap bisa diubah bebas untuk rentang lain.
+    const [defY, defM] = state.month.split("-").map(Number);
+    const lastDay = new Date(defY, defM, 0).getDate();
+    pprDari.value = `${state.month}-01`;
+    pprSampai.value = `${state.month}-${String(lastDay).padStart(2,"0")}`;
+    document.getElementById("ppr_tarikBtn").onclick = ()=> runProductReport();
+    document.getElementById("ppr_pdfBtn").onclick = ()=> pdfProductReport(window.__pprLastResult);
   }
   {
     const myNameSel = document.getElementById("leadsMyNameSelect");
@@ -5749,6 +5777,107 @@ async function fetchReportsInRange(dari, sampai){
   return all.filter(r => r.date >= dari && r.date <= sampai);
 }
 
+/* Hitung jumlah bulan berbeda (YYYY-MM) yang dicakup rentang tanggal --
+   dipakai untuk menghitung target proporsional (target bulanan x jumlah
+   bulan dalam rentang), bukan cuma angka bulan tunggal. */
+function countMonthsSpanned(dari, sampai){
+  const startMonth = dari.slice(0,7), endMonth = sampai.slice(0,7);
+  let count = 0, cur = startMonth;
+  while(cur <= endMonth && count < 24){
+    count++;
+    const [y,m] = cur.split("-").map(Number);
+    cur = m===12 ? `${y+1}-01` : `${y}-${String(m+1).padStart(2,"0")}`;
+  }
+  return count;
+}
+/* Laporan per Produk -- untuk SATU produk tertentu, tampilkan kinerja
+   SETIAP karyawan yang PUNYA target produk itu (yang tidak diberi target
+   TIDAK ikut muncul, sesuai permintaan): Target, Realisasi, Gap, Capaian
+   %, plus jumlah Leads yang ditugaskan & sudah di-FU untuk produk yang
+   sama. */
+async function runProductReport(){
+  const box = document.getElementById("ppr_resultBox");
+  const pdfBtn = document.getElementById("ppr_pdfBtn");
+  const product = document.getElementById("ppr_product").value;
+  const dari = document.getElementById("ppr_dari").value;
+  const sampai = document.getElementById("ppr_sampai").value;
+  if(!dari || !sampai){ toast("Isi tanggal dari & sampai dulu", "⚠️"); return; }
+  if(dari > sampai){ toast("Tanggal 'dari' tidak boleh setelah 'sampai'", "⚠️"); return; }
+  pdfBtn.style.display = "none";
+  box.innerHTML = `<p class="hint">Menarik laporan...</p>`;
+  let reportsRaw;
+  try{
+    reportsRaw = await fetchReportsInRange(dari, sampai);
+  }catch(e){
+    box.innerHTML = `<p class="hint" style="color:var(--danger)">Gagal menarik laporan: ${e && e.message||e}</p>`;
+    return;
+  }
+  if(state.tab !== "leads") return; // pengguna sudah pindah tab selagi menunggu
+  const monthsSpanned = countMonthsSpanned(dari, sampai);
+  // Buang laporan duplikat (nama+produk+keterangan sama persis) & yang
+  // BUKAN produk ini / belum disetujui -- hanya laporan approved yang
+  // dihitung sebagai realisasi resmi.
+  const marked = markDuplicates(reportsRaw);
+  const approved = marked.filter(r=>!r.isDuplicate && r.status==="approved" && r.product===product);
+  const rows = CFG.employees
+    .filter(e=> (e.targets[product]||0) > 0) // HANYA karyawan yang punya target produk ini
+    .map(e=>{
+      const realisasi = approved.filter(r=>r.employee===e.name).reduce((s,r)=>s+Number(r.amount||0),0);
+      const target = (e.targets[product]||0) * monthsSpanned;
+      const gap = Math.max(0, target-realisasi);
+      const pct = target>0 ? (realisasi/target*100) : 0;
+      const leadsForEmp = state.leads.filter(l=>l.product===product && l.assignedTo===e.name);
+      const sudahFU = leadsForEmp.filter(l=>l.followedBy).length;
+      return {name:e.name, team:e.team, target, realisasi, gap, pct, jumlahLead:leadsForEmp.length, sudahFU};
+    })
+    .sort((a,b)=>b.pct-a.pct);
+  window.__pprLastResult = {product, dari, sampai, monthsSpanned, rows};
+  if(!rows.length){
+    box.innerHTML = `<div class="empty"><div class="e-ic">📊</div>Belum ada karyawan yang diberi target untuk produk <b>${product}</b>. Atur target lewat Admin &rarr; Kelola Karyawan.</div>`;
+    return;
+  }
+  box.innerHTML = `
+    <p class="hint" style="margin-bottom:10px">Produk <b style="color:var(--gold-300)">${product}</b> &middot; ${dari} s/d ${sampai} (${monthsSpanned} bulan) &middot; ${rows.length} karyawan bertarget</p>
+    <div style="max-height:520px;overflow:auto"><table class="data">
+      <thead><tr><th>Nama</th><th>Target</th><th>Realisasi</th><th>Gap</th><th>%</th><th>Jumlah Lead</th><th>Sudah FU</th></tr></thead>
+      <tbody>
+      ${rows.map(r=>`<tr>
+        <td>${r.name}<div class="hint" style="font-size:10px">${r.team}</div></td>
+        <td>${fmtNumId(r.target)}</td>
+        <td>${fmtNumId(r.realisasi)}</td>
+        <td>${fmtNumId(r.gap)}</td>
+        <td><span class="badge ${r.pct>=100?'ok':r.pct>=70?'pending':'danger'}">${r.pct.toFixed(1)}%</span></td>
+        <td>${r.jumlahLead}</td>
+        <td>${r.sudahFU} / ${r.jumlahLead}</td>
+      </tr>`).join("")}
+      </tbody>
+    </table></div>
+  `;
+  pdfBtn.style.display = "inline-flex";
+}
+/* PDF Laporan per Produk -- tabel rapi, kolom disesuaikan supaya tidak
+   ada teks terpotong (nama tim dipisah baris kecil di bawah nama, angka
+   rata kanan). */
+function pdfProductReport(result){
+  if(!result || !result.rows || !result.rows.length){ toast("Tarik laporan dulu sebelum unduh PDF", "⚠️"); return; }
+  const { product, dari, sampai, monthsSpanned, rows } = result;
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) - Laporan ${product}`);
+  p.newPage(`Laporan Produk: ${product}`);
+  p.paragraph(`Rentang: ${dari} s/d ${sampai} (${monthsSpanned} bulan) — ${rows.length} karyawan bertarget produk ini`, {bold:true});
+  p.setY(p.getY()+8);
+  const cols = [
+    {label:"NAMA",w:130},{label:"TIM",w:75},
+    {label:"TARGET",w:65,align:"right"},{label:"REALISASI",w:70,align:"right"},{label:"GAP",w:60,align:"right"},{label:"%",w:50,align:"right"},
+    {label:"LEAD",w:45,align:"right"},{label:"SUDAH FU",w:60,align:"right"},
+  ];
+  p.tableHeader(cols);
+  rows.forEach((r,i)=>{
+    const pctColor = r.pct>=100 ? PDF_GREEN : r.pct>=70 ? PDF_AMBER : PDF_RED;
+    p.tableRow(cols, [r.name, r.team, fmtNumId(r.target), fmtNumId(r.realisasi), fmtNumId(r.gap), r.pct.toFixed(1)+"%", String(r.jumlahLead), `${r.sudahFU}/${r.jumlahLead}`], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,pctColor,PDF_BLACK,PDF_BLACK]});
+  });
+  p.finish(`Laporan_${product}_${dari}_${sampai}.pdf`);
+  toast(`PDF laporan ${product} berhasil diunduh`, "📄");
+}
 function currentDailyRangeFilters(){
   return {
     dari: document.getElementById("dr_dari").value,

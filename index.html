@@ -8707,6 +8707,21 @@ function doLogout(){
    INIT
    ============================================================ */
 (function init(){
+  // PENTING: kirim ping "bangunkan" Apps Script SESEGERA MUNGKIN saat
+  // halaman baru dimuat -- bahkan SEBELUM pengguna mengetik NIP sama
+  // sekali. Ini PENTING KHUSUSNYA untuk sesi baru/InPrivate (tanpa sesi
+  // tersimpan sebelumnya), di mana keepAppsScriptWarm() yang berjalan
+  // SETELAH login tidak sempat membantu -- permintaan PERTAMA (mengecek
+  // NIP) itulah yang paling rawan kena cold-start. Dengan mengirim ping
+  // ini SEDINI mungkin, Apps Script punya beberapa detik EKSTRA untuk
+  // "bangun" selagi pengguna baru mengetik NIP-nya (yang wajarnya makan
+  // waktu beberapa detik) -- jadi begitu tombol "Masuk" diklik, server
+  // sudah lebih siap merespons cepat.
+  if(typeof APPS_SCRIPT_URL !== "undefined" && APPS_SCRIPT_URL){
+    const warmupController = new AbortController();
+    setTimeout(()=> warmupController.abort(), 8000);
+    fetch(`${APPS_SCRIPT_URL}?ping=1`, {signal: warmupController.signal}).catch(()=>{});
+  }
   const loginNIPEl = document.getElementById("loginNIP");
   loginNIPEl.focus();
   // Di Android, keyboard virtual yang muncul/hilang saat mengetik NIP memicu

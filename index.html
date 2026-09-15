@@ -2038,6 +2038,21 @@ async function loadMonthData(){
    Dashboard sama sekali) — keduanya dimuat belakangan di latar belakang
    sesaat setelah login selesai, jadi biasanya sudah siap begitu pengguna
    benar-benar membuka tab Leads/Informasi, tanpa ikut memperlambat login. */
+/* Muat ulang data bulan yang sedang aktif secara PAKSA -- dipakai tombol
+   "Muat Ulang Data" yang muncul kalau suatu halaman terlihat kosong
+   (0.0% di semua tempat) padahal seharusnya ada data. Ini memberi
+   pengguna jalan CEPAT & JELAS untuk mencoba lagi, daripada dibiarkan
+   bingung apakah datanya benar-benar hilang atau cuma gagal dimuat. */
+async function reloadCurrentMonthData(){
+  toast("Memuat ulang data...", "🔄");
+  try{
+    await loadEssentialMonthData();
+    if(state.tab) render();
+    toast("Data berhasil dimuat ulang", "✅");
+  }catch(e){
+    toast("Masih gagal memuat, coba lagi sesaat lagi", "⚠️");
+  }
+}
 async function loadEssentialMonthData(){
   const [r,l,p,pl,mk,ld] = await Promise.all([
     safeLoadList(keyReports(state.month)),
@@ -3206,6 +3221,11 @@ function renderDashboard(){
   const sections = {
     kpi: `
   <h2 class="sec">Ringkasan Cabang <span class="line"></span><span style="font-size:12px;color:var(--ink-200);font-weight:700">${monthLabel()}</span></h2>
+  ${state.reports.length===0 ? `
+    <div class="card" style="border-color:var(--gold-500);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <p class="hint" style="margin:0">⚠️ Belum ada laporan terbaca untuk bulan ini. Kalau Anda yakin seharusnya ada data, coba muat ulang -- bisa jadi cuma gagal dimuat sesaat, bukan datanya hilang.</p>
+      <button class="btn ghost sm" id="dashReloadBtn">🔄 Muat Ulang Data</button>
+    </div>` : ""}
   <div class="grid cols-4">
     <div class="card kpi glow compact"><div class="orb o-gold"></div><div class="glyph">🏆</div>
       <div class="lbl">Posisi Tertinggi Saat Ini</div>
@@ -3249,6 +3269,8 @@ function renderDashboard(){
     ? CFG.dashboardSectionOrder : validOrder;
   const html = order.map(k=>sections[k]||"").join("\n");
   view.innerHTML = html;
+  const dashReloadBtn = document.getElementById("dashReloadBtn");
+  if(dashReloadBtn) dashReloadBtn.onclick = reloadCurrentMonthData;
 
   const topPerTeamWrap = document.getElementById("topPerTeamCards");
   if(topPerTeamWrap){
@@ -3707,8 +3729,15 @@ function renderLeaderboard(){
     ? CFG.leaderboardSectionOrder : validOrder;
   view.innerHTML = `
     <h2 class="sec">Leaderboard Akuisisi <span class="line"></span><span style="font-size:11px;color:var(--ink-400);font-weight:600">klik nama untuk lihat gap per produk</span></h2>
+    ${state.reports.length===0 ? `
+    <div class="card" style="border-color:var(--gold-500);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <p class="hint" style="margin:0">⚠️ Belum ada laporan terbaca untuk bulan ini. Kalau Anda yakin seharusnya ada data, coba muat ulang -- bisa jadi cuma gagal dimuat sesaat, bukan datanya hilang.</p>
+      <button class="btn ghost sm" id="lbReloadBtn">🔄 Muat Ulang Data</button>
+    </div>` : ""}
     ${order.map(k=>sections[k]||"").join("\n")}
   `;
+  const reloadBtn = document.getElementById("lbReloadBtn");
+  if(reloadBtn) reloadBtn.onclick = reloadCurrentMonthData;
   document.querySelectorAll("#lbChips .chip").forEach(c=>{
     c.onclick = ()=>{
       document.querySelectorAll("#lbChips .chip").forEach(x=>x.classList.remove("active"));
@@ -4204,7 +4233,7 @@ function renderLeadsSubTab(container){
     pprDari.value = `${state.month}-01`;
     pprSampai.value = `${state.month}-${String(lastDay).padStart(2,"0")}`;
     document.getElementById("ppr_tarikBtn").onclick = ()=> runProductReport();
-    document.getElementById("ppr_pdfBtn").onclick = ()=> pdfProductReport(window.__pprLastResult);
+    document.getElementById("ppr_pdfBtn").onclick = ()=> pdfProductReport(window.__pprLastFilters);
   }
   {
     const myNameSel = document.getElementById("leadsMyNameSelect");
@@ -5826,6 +5855,41 @@ function countMonthsSpanned(dari, sampai){
    TIDAK ikut muncul, sesuai permintaan): Target, Realisasi, Gap, Capaian
    %, plus jumlah Leads yang ditugaskan & sudah di-FU untuk produk yang
    sama. */
+/* Hitung baris laporan per produk -- dipisah jadi fungsi sendiri (bukan
+   ditempel di dalam runProductReport) supaya BISA DIPANGGIL ULANG SETIAP
+   KALI dibutuhkan (baik untuk tampilan layar MAUPUN tombol Unduh PDF),
+   selalu memakai CFG.employees & state.leads TERBARU saat itu juga. Ini
+   memperbaiki bug: sebelumnya tombol "Unduh PDF" memakai hasil LAMA yang
+   sudah disimpan sebelumnya -- kalau Admin sempat menghapus/menambah
+   karyawan SETELAH klik "Tarik Laporan" tapi SEBELUM klik "Unduh PDF",
+   PDF-nya masih menampilkan data lama (termasuk karyawan yang sudah
+   dihapus). Sekarang PDF SELALU dihitung ulang dari data yang paling
+   baru tepat sebelum dibuat. */
+async function computeProductReportRows(product, dari, sampai){
+  const reportsRaw = await fetchReportsInRange(dari, sampai);
+  const monthsSpanned = countMonthsSpanned(dari, sampai);
+  const marked = markDuplicates(reportsRaw);
+  const approved = marked.filter(r=>!r.isDuplicate && r.status==="approved" && r.product===product);
+  const rows = CFG.employees
+    .filter(e=> (e.targets[product]||0) > 0) // HANYA karyawan yang MASIH ADA dan punya target produk ini saat ini
+    .map(e=>{
+      const realisasi = approved.filter(r=>r.employee===e.name).reduce((s,r)=>s+Number(r.amount||0),0);
+      const target = (e.targets[product]||0) * monthsSpanned;
+      const gap = Math.max(0, target-realisasi);
+      const pct = target>0 ? (realisasi/target*100) : 0;
+      // PENTING: bandingkan nama SETELAH di-trim (buang spasi awal/akhir)
+      // supaya lead yang ditugaskan tetap terhitung meski ada selisih
+      // spasi tak sengaja antara nama di data lead vs nama karyawan --
+      // sebelumnya perbandingan persis (===) bisa membuat lead yang
+      // SEBENARNYA sudah ditugaskan tetap terhitung 0 kalau ada perbedaan
+      // spasi seperti itu.
+      const leadsForEmp = state.leads.filter(l=>l.product===product && l.assignedTo && l.assignedTo.trim()===e.name.trim());
+      const sudahFU = leadsForEmp.filter(l=>l.followedBy).length;
+      return {name:e.name, team:e.team, target, realisasi, gap, pct, jumlahLead:leadsForEmp.length, sudahFU};
+    })
+    .sort((a,b)=>b.pct-a.pct);
+  return {monthsSpanned, rows};
+}
 async function runProductReport(){
   const box = document.getElementById("ppr_resultBox");
   const pdfBtn = document.getElementById("ppr_pdfBtn");
@@ -5836,33 +5900,15 @@ async function runProductReport(){
   if(dari > sampai){ toast("Tanggal 'dari' tidak boleh setelah 'sampai'", "⚠️"); return; }
   pdfBtn.style.display = "none";
   box.innerHTML = `<p class="hint">Menarik laporan...</p>`;
-  let reportsRaw;
+  let monthsSpanned, rows;
   try{
-    reportsRaw = await fetchReportsInRange(dari, sampai);
+    ({monthsSpanned, rows} = await computeProductReportRows(product, dari, sampai));
   }catch(e){
     box.innerHTML = `<p class="hint" style="color:var(--danger)">Gagal menarik laporan: ${e && e.message||e}</p>`;
     return;
   }
   if(state.tab !== "leads") return; // pengguna sudah pindah tab selagi menunggu
-  const monthsSpanned = countMonthsSpanned(dari, sampai);
-  // Buang laporan duplikat (nama+produk+keterangan sama persis) & yang
-  // BUKAN produk ini / belum disetujui -- hanya laporan approved yang
-  // dihitung sebagai realisasi resmi.
-  const marked = markDuplicates(reportsRaw);
-  const approved = marked.filter(r=>!r.isDuplicate && r.status==="approved" && r.product===product);
-  const rows = CFG.employees
-    .filter(e=> (e.targets[product]||0) > 0) // HANYA karyawan yang punya target produk ini
-    .map(e=>{
-      const realisasi = approved.filter(r=>r.employee===e.name).reduce((s,r)=>s+Number(r.amount||0),0);
-      const target = (e.targets[product]||0) * monthsSpanned;
-      const gap = Math.max(0, target-realisasi);
-      const pct = target>0 ? (realisasi/target*100) : 0;
-      const leadsForEmp = state.leads.filter(l=>l.product===product && l.assignedTo===e.name);
-      const sudahFU = leadsForEmp.filter(l=>l.followedBy).length;
-      return {name:e.name, team:e.team, target, realisasi, gap, pct, jumlahLead:leadsForEmp.length, sudahFU};
-    })
-    .sort((a,b)=>b.pct-a.pct);
-  window.__pprLastResult = {product, dari, sampai, monthsSpanned, rows};
+  window.__pprLastFilters = {product, dari, sampai};
   if(!rows.length){
     box.innerHTML = `<div class="empty"><div class="e-ic">📊</div>Belum ada karyawan yang diberi target untuk produk <b>${product}</b>. Atur target lewat Admin &rarr; Kelola Karyawan.</div>`;
     return;
@@ -5882,6 +5928,17 @@ async function runProductReport(){
         <td>${r.sudahFU} / ${r.jumlahLead}</td>
       </tr>`).join("")}
       </tbody>
+      <tfoot>
+      <tr style="font-weight:800;border-top:2px solid var(--glass-brd)">
+        <td>TOTAL</td>
+        <td>${fmtNumId(rows.reduce((s,r)=>s+r.target,0))}</td>
+        <td>${fmtNumId(rows.reduce((s,r)=>s+r.realisasi,0))}</td>
+        <td>${fmtNumId(rows.reduce((s,r)=>s+r.gap,0))}</td>
+        <td>${(rows.reduce((s,r)=>s+r.pct,0)/rows.length).toFixed(1)}% <span class="hint" style="font-size:9px;font-weight:400">(rata-rata)</span></td>
+        <td>${rows.reduce((s,r)=>s+r.jumlahLead,0)}</td>
+        <td>${rows.reduce((s,r)=>s+r.sudahFU,0)} / ${rows.reduce((s,r)=>s+r.jumlahLead,0)}</td>
+      </tr>
+      </tfoot>
     </table></div>
   `;
   pdfBtn.style.display = "inline-flex";
@@ -5889,25 +5946,32 @@ async function runProductReport(){
 /* PDF Laporan per Produk -- tabel rapi, kolom disesuaikan supaya tidak
    ada teks terpotong (nama tim dipisah baris kecil di bawah nama, angka
    rata kanan). */
-async function pdfProductReport(result){
-  if(!result || !result.rows || !result.rows.length){ toast("Tarik laporan dulu sebelum unduh PDF", "⚠️"); return; }
-  // PENTING (bug diperbaiki): library jsPDF harus dipastikan SUDAH DIMUAT
-  // dulu sebelum dipakai -- fungsi ini sebelumnya langsung memakai
-  // window.jspdf tanpa memuatnya dulu, menyebabkan error "Cannot
-  // destructure property jsPDF of window.jspdf as it is undefined" kalau
-  // laporan lain belum pernah diunduh sebagai PDF sebelumnya di sesi ini.
+async function pdfProductReport(filters){
+  if(!filters || !filters.product){ toast("Tarik laporan dulu sebelum unduh PDF", "⚠️"); return; }
   await ensureJsPDF();
-  const { product, dari, sampai, monthsSpanned, rows } = result;
+  const { product, dari, sampai } = filters;
+  // PENTING (bug diperbaiki): PDF sekarang SELALU dihitung ULANG di sini
+  // (bukan memakai hasil lama yang tersimpan) -- supaya kalau Admin sempat
+  // menghapus/menambah karyawan atau mengubah target SETELAH klik "Tarik
+  // Laporan" tapi SEBELUM klik "Unduh PDF", angkanya tetap benar dan
+  // TIDAK menampilkan karyawan yang sudah dihapus.
+  toast("Menyiapkan PDF...", "📄");
+  let monthsSpanned, rows;
+  try{
+    ({monthsSpanned, rows} = await computeProductReportRows(product, dari, sampai));
+  }catch(e){
+    toast("Gagal menyiapkan PDF, coba lagi", "⚠️");
+    return;
+  }
+  if(!rows.length){ toast("Tidak ada data untuk diunduh", "⚠️"); return; }
   const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) - Laporan ${product}`);
   p.newPage(`Laporan Produk: ${product}`);
   p.paragraph(`Rentang: ${dari} s/d ${sampai} (${monthsSpanned} bulan) — ${rows.length} karyawan bertarget produk ini`, {bold:true});
   p.setY(p.getY()+8);
-  // PENTING (bug diperbaiki): lebar kolom total sebelumnya (555pt) MELEBIHI
-  // lebar halaman yang bisa dicetak (515pt, setelah margin kiri-kanan) --
-  // inilah sebabnya kolom terakhir (SUDAH FU) terpotong/tidak terlihat di
-  // PDF. Sekarang total lebar dirampingkan jadi 495pt, aman di bawah batas.
+  // Lebar kolom dijaga tetap AMAN di bawah lebar halaman yang bisa dicetak
+  // (~515pt) -- total di sini 465pt, supaya tidak ada lagi kolom terpotong.
   const cols = [
-    {label:"NAMA",w:105},{label:"TIM",w:62},
+    {label:"NAMA",w:100},{label:"TIM",w:60},
     {label:"TARGET",w:55,align:"right"},{label:"REALISASI",w:60,align:"right"},{label:"GAP",w:50,align:"right"},{label:"%",w:45,align:"right"},
     {label:"LEAD",w:40,align:"right"},{label:"SUDAH FU",w:55,align:"right"},
   ];
@@ -5916,6 +5980,17 @@ async function pdfProductReport(result){
     const pctColor = r.pct>=100 ? PDF_GREEN : r.pct>=70 ? PDF_AMBER : PDF_RED;
     p.tableRow(cols, [r.name, r.team, fmtNumId(r.target), fmtNumId(r.realisasi), fmtNumId(r.gap), r.pct.toFixed(1)+"%", String(r.jumlahLead), `${r.sudahFU}/${r.jumlahLead}`], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,pctColor,PDF_BLACK,PDF_BLACK]});
   });
+  // Baris TOTAL di bawah -- semua kolom angka dijumlahkan, KECUALI kolom %
+  // yang dirata-ratakan (menjumlahkan persentase tidak bermakna secara
+  // statistik, beda dengan menjumlahkan nilai Target/Realisasi/Gap/Lead).
+  const totalTarget = rows.reduce((s,r)=>s+r.target,0);
+  const totalRealisasi = rows.reduce((s,r)=>s+r.realisasi,0);
+  const totalGap = rows.reduce((s,r)=>s+r.gap,0);
+  const avgPct = rows.reduce((s,r)=>s+r.pct,0)/rows.length;
+  const totalLead = rows.reduce((s,r)=>s+r.jumlahLead,0);
+  const totalFU = rows.reduce((s,r)=>s+r.sudahFU,0);
+  p.tableRow(cols, ["TOTAL","", fmtNumId(totalTarget), fmtNumId(totalRealisasi), fmtNumId(totalGap), avgPct.toFixed(1)+"%*", String(totalLead), `${totalFU}/${totalLead}`], {bold:true});
+  p.paragraph("*Kolom % pada baris TOTAL adalah RATA-RATA capaian seluruh karyawan, bukan penjumlahan.", {size:7.5, color:[130,130,130]});
   p.finish(`Laporan_${product}_${dari}_${sampai}.pdf`);
   toast(`PDF laporan ${product} berhasil diunduh`, "📄");
 }

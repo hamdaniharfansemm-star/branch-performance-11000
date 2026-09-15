@@ -1947,11 +1947,16 @@ async function loadYearlyReportsPhase(year){
   const allKeys = [];
   months.forEach(mo=>{ const rk = keyReports(mo); allKeys.push(rk, `${rk}::c0`); });
   await preloginBatchFetch(allKeys);
+  // PERCEPAT: sebelumnya 12 bulan dimuat SATU PER SATU secara berurutan
+  // (nunggu bulan 1 selesai baru mulai bulan 2, dst) -- padahal semuanya
+  // SUDAH ADA di cache hasil preloginBatchFetch di atas (1 request
+  // gabungan), jadi TIDAK ADA alasan untuk menunggu satu per satu. Ganti
+  // ke Promise.all supaya ke-12 bulan diproses BERSAMAAN, bukan berbaris.
   const reportsByMonth = {};
-  for(const mo of months){
+  await Promise.all(months.map(async (mo)=>{
     try{ reportsByMonth[mo] = await loadList(keyReports(mo)); }
     catch(e){ reportsByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
-  }
+  }));
   __loginPrefetchCache = null;
   return {months, reportsByMonth, pipelineByMonth:{}, layananByMonth:{}, penilaianByMonth:{}, _partial:true};
 }
@@ -1968,15 +1973,17 @@ async function loadYearlyRemainderPhase(year){
   });
   allKeys.push(KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`);
   await preloginBatchFetch(allKeys);
+  // PERCEPAT: sama seperti Fase 1 -- 12 bulan x 3 jenis data sekarang
+  // diproses BERSAMAAN (Promise.all), bukan berurutan satu per satu.
   const pipelineByMonth = {}, layananByMonth = {}, penilaianByMonth = {};
-  for(const mo of months){
+  await Promise.all(months.map(async (mo)=>{
     try{ pipelineByMonth[mo] = await loadPipelineForMonth(mo); }
     catch(e){ pipelineByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
     try{ layananByMonth[mo] = await loadList(keyLayanan(mo)); }
     catch(e){ layananByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
     try{ penilaianByMonth[mo] = await loadList(keyPenilaian(mo)); }
     catch(e){ penilaianByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
-  }
+  }));
   __loginPrefetchCache = null;
   return {pipelineByMonth, layananByMonth, penilaianByMonth};
 }
@@ -1995,8 +2002,10 @@ async function loadYearlyData(year, forceRefresh){
   // Legacy pipeline hanya perlu dicek sekali (bukan per-bulan) untuk migrasi.
   allKeys.push(KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`);
   await preloginBatchFetch(allKeys);
+  // PERCEPAT: sama seperti loadYearlyReportsPhase/RemainderPhase -- 12
+  // bulan diproses BERSAMAAN (Promise.all), bukan berurutan satu per satu.
   const reportsByMonth = {}, pipelineByMonth = {}, layananByMonth = {}, penilaianByMonth = {};
-  for(const mo of months){
+  await Promise.all(months.map(async (mo)=>{
     try{ reportsByMonth[mo] = await loadList(keyReports(mo)); }
     catch(e){ reportsByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
     try{ pipelineByMonth[mo] = await loadPipelineForMonth(mo); }
@@ -2005,7 +2014,7 @@ async function loadYearlyData(year, forceRefresh){
     catch(e){ layananByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
     try{ penilaianByMonth[mo] = await loadList(keyPenilaian(mo)); }
     catch(e){ penilaianByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
-  }
+  }));
   __loginPrefetchCache = null; // cache batch sekali pakai, kosongkan lagi
   const result = {months, reportsByMonth, pipelineByMonth, layananByMonth, penilaianByMonth};
   __yearlyDataCache.set(year, result);

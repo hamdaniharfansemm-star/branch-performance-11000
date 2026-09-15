@@ -5863,8 +5863,14 @@ async function runProductReport(){
 /* PDF Laporan per Produk -- tabel rapi, kolom disesuaikan supaya tidak
    ada teks terpotong (nama tim dipisah baris kecil di bawah nama, angka
    rata kanan). */
-function pdfProductReport(result){
+async function pdfProductReport(result){
   if(!result || !result.rows || !result.rows.length){ toast("Tarik laporan dulu sebelum unduh PDF", "⚠️"); return; }
+  // PENTING (bug diperbaiki): library jsPDF harus dipastikan SUDAH DIMUAT
+  // dulu sebelum dipakai -- fungsi ini sebelumnya langsung memakai
+  // window.jspdf tanpa memuatnya dulu, menyebabkan error "Cannot
+  // destructure property jsPDF of window.jspdf as it is undefined" kalau
+  // laporan lain belum pernah diunduh sebagai PDF sebelumnya di sesi ini.
+  await ensureJsPDF();
   const { product, dari, sampai, monthsSpanned, rows } = result;
   const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) - Laporan ${product}`);
   p.newPage(`Laporan Produk: ${product}`);

@@ -1327,6 +1327,32 @@ function loadScriptOnce(url){
   });
   return __libCache[url];
 }
+/* "Jaga tetap bangun" Apps Script -- KENAPA INI PENTING:
+   Google Apps Script (server aplikasi ini) akan "tertidur" kalau tidak
+   ada permintaan masuk selama beberapa waktu. Permintaan PERTAMA setelah
+   tertidur butuh waktu "membangunkannya" lagi (cold start) -- ini BISA
+   memakan 10-30+ detik meskipun Sheet-nya kecil dan kodenya sudah cepat
+   (sudah dikonfirmasi: Sheet cuma 30 baris, TAPI tetap kadang timeout).
+   Ini SEPENUHNYA di luar kendali kode aplikasi -- satu-satunya cara
+   mencegahnya adalah tidak membiarkan Apps Script "diam" terlalu lama.
+   Solusinya: kirim permintaan RINGAN (?ping=1, tidak menyentuh Sheet
+   sama sekali) setiap beberapa menit SELAMA pengguna masih memakai
+   aplikasi -- supaya begitu pengguna benar-benar butuh data (submit
+   laporan, buka halaman, dst), Apps Script sudah dalam keadaan "bangun"
+   dan merespons cepat, bukan kena cold-start di saat genting. */
+let __keepWarmTimer = null;
+function keepAppsScriptWarm(){
+  if(!APPS_SCRIPT_URL || __keepWarmTimer) return; // sudah berjalan, jangan dobel
+  const ping = ()=>{
+    const controller = new AbortController();
+    const timer = setTimeout(()=> controller.abort(), 8000);
+    fetch(`${APPS_SCRIPT_URL}?ping=1`, {signal: controller.signal})
+      .catch(()=>{}) // diam-diam saja -- ping yang gagal bukan masalah besar, cuma dicoba lagi nanti
+      .finally(()=> clearTimeout(timer));
+  };
+  ping(); // sekali langsung supaya cepat "bangun" kalau kebetulan sedang tidur
+  __keepWarmTimer = setInterval(ping, 4*60*1000); // setiap 4 menit selama sesi berjalan
+}
 async function ensureJsPDF(){
   if(!window.jspdf) await loadScriptOnce("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
 }
@@ -5876,10 +5902,14 @@ async function pdfProductReport(result){
   p.newPage(`Laporan Produk: ${product}`);
   p.paragraph(`Rentang: ${dari} s/d ${sampai} (${monthsSpanned} bulan) — ${rows.length} karyawan bertarget produk ini`, {bold:true});
   p.setY(p.getY()+8);
+  // PENTING (bug diperbaiki): lebar kolom total sebelumnya (555pt) MELEBIHI
+  // lebar halaman yang bisa dicetak (515pt, setelah margin kiri-kanan) --
+  // inilah sebabnya kolom terakhir (SUDAH FU) terpotong/tidak terlihat di
+  // PDF. Sekarang total lebar dirampingkan jadi 495pt, aman di bawah batas.
   const cols = [
-    {label:"NAMA",w:130},{label:"TIM",w:75},
-    {label:"TARGET",w:65,align:"right"},{label:"REALISASI",w:70,align:"right"},{label:"GAP",w:60,align:"right"},{label:"%",w:50,align:"right"},
-    {label:"LEAD",w:45,align:"right"},{label:"SUDAH FU",w:60,align:"right"},
+    {label:"NAMA",w:105},{label:"TIM",w:62},
+    {label:"TARGET",w:55,align:"right"},{label:"REALISASI",w:60,align:"right"},{label:"GAP",w:50,align:"right"},{label:"%",w:45,align:"right"},
+    {label:"LEAD",w:40,align:"right"},{label:"SUDAH FU",w:55,align:"right"},
   ];
   p.tableHeader(cols);
   rows.forEach((r,i)=>{
@@ -8353,6 +8383,11 @@ async function doLoginFlow(nip, recordActivityNip){
     document.getElementById("loginFormWrap").style.display = "block";
   });
   playSound("welcome");
+  // PENTING: mulai "jaga tetap bangun" Apps Script SEKARANG (bukan cuma
+  // sekali saat login) -- lihat keepAppsScriptWarm() untuk penjelasan
+  // lengkap kenapa ini penting untuk mencegah error "server tidak
+  // merespons" yang berulang.
+  keepAppsScriptWarm();
   if(window.__storageErrors && window.__storageErrors.length){
     // Tampilkan error asli dari backend (mis. Google Sheets/Apps Script) supaya
     // masalah akses bisa langsung terlihat & dilaporkan, bukan gagal secara diam-diam.
@@ -8536,6 +8571,9 @@ document.getElementById("loginForm").onsubmit = async (e)=>{
 function doLogout(){
   try{ localStorage.removeItem("bp11000_session"); }catch(e){}
   state.nip = ""; state.role = "karyawan"; state.tab = "dashboard";
+  // Hentikan ping "jaga tetap bangun" -- tidak perlu lagi selama tidak ada
+  // yang memakai aplikasi setelah logout.
+  if(__keepWarmTimer){ clearInterval(__keepWarmTimer); __keepWarmTimer = null; }
   playSound("click");
   document.getElementById("mainWrap").style.display = "none";
   const loginScreen = document.getElementById("loginScreen");

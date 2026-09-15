@@ -1497,29 +1497,34 @@ async function fetchRaw(key){
       // kalau fungsi ini menggantung, SELURUH aplikasi ikut menggantung —
       // termasuk tombol login yang macet selamanya di "Memuat...".
       //
-      // COBA ULANG OTOMATIS: sinyal HP yang sempat lemah/putus-nyambung
-      // sering kali cuma gangguan SESAAT (beberapa detik) — daripada langsung
-      // menyerah dan menampilkan error ke pengguna, kita coba lagi otomatis
-      // sekali lagi (2 percobaan total) secara diam-diam dengan jeda
-      // singkat di antaranya. Kalau SEMUA percobaan gagal, baru benar-benar
-      // dianggap gagal.
-      // PERCEPAT: dikurangi dari 3x percobaan @ 11 detik (maks 33 detik)
-      // jadi 2x percobaan @ 8 detik (maks 16 detik) per key -- supaya
-      // login & buka halaman terasa jauh lebih responsif saat koneksi
-      // benar-benar bermasalah, bukan menunggu lama untuk SETIAP key.
+      // COBA ULANG OTOMATIS: sinyal HP yang sempat lemah/putus-nyambung,
+      // atau Google Apps Script yang sedang "cold start" (butuh beberapa
+      // detik untuk bangun setelah tidak dipakai), sering kali cuma
+      // gangguan SESAAT — daripada langsung menyerah dan menampilkan
+      // error ke pengguna, kita coba lagi otomatis sampai 2x lagi (3
+      // percobaan total) secara diam-diam dengan jeda singkat di
+      // antaranya. Kalau SEMUA percobaan gagal, baru benar-benar dianggap
+      // gagal.
+      // PENYEIMBANG: sebelumnya sempat dipangkas ke 2x @ 8 detik supaya
+      // lebih cepat, tapi ternyata itu KURANG SABAR untuk cold-start Apps
+      // Script yang wajar (bisa 10+ detik) -- menyebabkan login gagal
+      // padahal server sebenarnya baik-baik saja, cuma butuh waktu lebih
+      // untuk "bangun". Sekarang 10 detik x 3 percobaan (maks 30 detik)
+      // -- lebih sabar untuk yang wajar, tapi tetap lebih cepat dari
+      // sebelumnya (33 detik).
       let lastErr;
-      for(let attempt=1; attempt<=2; attempt++){
+      for(let attempt=1; attempt<=3; attempt++){
         try{
-          return await fetchRawOnce(key, 8000);
+          return await fetchRawOnce(key, 10000);
         }catch(err){
           lastErr = err;
-          if(attempt<2) await sleep(400 * attempt); // jeda makin lama tiap percobaan
+          if(attempt<3) await sleep(400 * attempt); // jeda makin lama tiap percobaan
         }
       }
       throw lastErr;
     }catch(e){
       const isTimeout = e && e.name === "AbortError";
-      window.__storageErrors.push(isTimeout ? `Waktu tunggu habis mengambil "${key}" (server tidak merespons dalam 8 detik, sudah dicoba 2x)` : `Gagal mengambil "${key}" setelah 2x percobaan: ${String(e && e.message || e)}`);
+      window.__storageErrors.push(isTimeout ? `Waktu tunggu habis mengambil "${key}" (server tidak merespons dalam 10 detik, sudah dicoba 3x)` : `Gagal mengambil "${key}" setelah 3x percobaan: ${String(e && e.message || e)}`);
       // PENTING: lempar ulang error ini (jangan kembalikan null begitu saja).
       // null harus HANYA berarti "key ini memang belum ada", bukan "gagal
       // mengambil data" — kalau dua kondisi ini dicampur, kode yang menyimpan

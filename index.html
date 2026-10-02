@@ -1478,23 +1478,18 @@ async function preloginBatchFetchOnce(keys, timeoutMs){
 async function preloginBatchFetch(keys){
   if(!APPS_SCRIPT_URL) return;
   try{
-    // PERCEPAT & PERBAIKI (bug "Gagal memuat" di Laporan Tahunan): permintaan
-    // gabungan ini mengerjakan JAUH LEBIH BANYAK di sisi server (mencari
-    // puluhan/ratusan key sekaligus) dibanding satu permintaan key tunggal --
-    // jadi diberi waktu lebih dari 6 detik yang lama. TAPI versi sebelumnya
-    // mengulang percobaan yang gagal dengan waktu tunggu LEBIH PANJANG LAGI
-    // (bisa sampai 25+ detik total HANYA untuk tahap ini) -- padahal
-    // pemanggilnya (mis. Laporan Tahunan) punya batas waktu KERAS 30 detik
-    // untuk SELURUH proses. Akibatnya batas 30 detik itu sering terlampaui
-    // duluan sebelum sempat jatuh ke cara cadangan (satu per satu), sehingga
-    // selalu muncul "Gagal memuat" walau sebenarnya data akan berhasil
-    // didapat kalau diberi kesempatan mencoba cara cadangan itu.
-    // Sekarang HANYA SATU percobaan dengan waktu yang wajar -- begitu gagal,
-    // LANGSUNG jatuh ke cara cadangan (fetchRaw satu-satu, yang sudah
-    // punya percobaan ulangnya sendiri), tidak membuang waktu mengulang cara
-    // yang sama dua kali dengan batas yang sama-sama sudah terbukti kurang.
-    const timeout = Math.min(20000, Math.max(8000, keys.length * 200));
-    __loginPrefetchCache = await preloginBatchFetchOnce(keys, timeout);
+    // Beri batas waktu supaya proses ini TIDAK PERNAH menggantung tanpa
+    // henti kalau jaringan benar-benar macet (mis. sinyal hilang) — kalau
+    // sampai 6 detik belum selesai, lanjutkan saja tanpa cache prefetch
+    // (fetchRaw() akan otomatis mengambil satu per satu sebagai cadangan,
+    // dan sekarang fetchRaw() sendiri JUGA sudah punya percobaan ulang).
+    // Coba sekali lagi kalau percobaan pertama gagal karena sinyal sesaat.
+    try{
+      __loginPrefetchCache = await preloginBatchFetchOnce(keys, 6000);
+    }catch(firstErr){
+      await sleep(500);
+      __loginPrefetchCache = await preloginBatchFetchOnce(keys, 6000);
+    }
   }catch(e){
     // Gagal prefetch -- tidak apa-apa, biarkan null supaya fetchRaw() jalan
     // seperti biasa satu per satu (sedikit lebih lambat, tapi tetap benar).
@@ -1502,6 +1497,32 @@ async function preloginBatchFetch(keys){
   }
 }
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+/* ============================================================
+   CADANGAN LOKAL (localStorage) UNTUK SETIAP KEY
+   ------------------------------------------------------------
+   Supaya kalau server (Apps Script) lambat/tidak merespons, pengguna
+   TIDAK melihat "0 / tidak ada data" begitu saja -- lebih baik
+   menampilkan data TERAKHIR YANG DIKETAHUI BENAR (tersimpan di
+   perangkat ini sendiri, bukan di server) sambil aplikasi tetap
+   mencoba mengambil data terbaru di latar belakang / saat pengguna
+   klik "Muat Ulang Data". Ini TIDAK menggantikan server sebagai
+   sumber data utama -- hanya jaring pengaman di SISI TAMPILAN saat
+   server sedang bermasalah sesaat.
+   ============================================================ */
+const LOCAL_CACHE_PREFIX = "bp11000_cache:";
+function cacheRawLocally(key, value){
+  try{
+    if(value == null) return; // jangan timpa cache yang baik dengan kosong/null
+    localStorage.setItem(LOCAL_CACHE_PREFIX + key, value);
+  }catch(e){ /* penuh / tidak tersedia (mode privat dsb) -- abaikan, tidak fatal */ }
+}
+function getCachedRawLocally(key){
+  try{
+    return localStorage.getItem(LOCAL_CACHE_PREFIX + key); // null kalau memang belum pernah ada cache
+  }catch(e){ return null; }
+}
+
 /* Satu kali percobaan mengambil satu key — dipisah dari fetchRaw supaya bisa
    dipanggil ulang otomatis (retry) tanpa duplikasi kode. */
 async function fetchRawOnce(key, timeoutMs){
@@ -1517,7 +1538,9 @@ async function fetchRawOnce(key, timeoutMs){
 }
 async function fetchRaw(key){
   if(__loginPrefetchCache && __loginPrefetchCache.has(key)){
-    return __loginPrefetchCache.get(key);
+    const v = __loginPrefetchCache.get(key);
+    cacheRawLocally(key, v);
+    return v;
   }
   if(APPS_SCRIPT_URL){
     try{
@@ -1546,7 +1569,9 @@ async function fetchRaw(key){
       let lastErr;
       for(let attempt=1; attempt<=3; attempt++){
         try{
-          return await fetchRawOnce(key, 10000);
+          const v = await fetchRawOnce(key, 10000);
+          cacheRawLocally(key, v); // simpan salinan lokal -- jaring pengaman kalau nanti server bermasalah
+          return v;
         }catch(err){
           lastErr = err;
           if(attempt<3) await sleep(400 * attempt); // jeda makin lama tiap percobaan
@@ -1555,6 +1580,18 @@ async function fetchRaw(key){
       throw lastErr;
     }catch(e){
       const isTimeout = e && e.name === "AbortError";
+      // JARING PENGAMAN: server tidak merespons setelah semua percobaan --
+      // daripada menampilkan "0 / kosong" ke pengguna (yang terlihat seperti
+      // data hilang padahal cuma gangguan jaringan sesaat), pakai salinan
+      // TERAKHIR YANG BERHASIL diambil dan tersimpan di PERANGKAT INI. Ini
+      // tetap dicatat sebagai error (bukan disembunyikan) supaya Admin tahu
+      // data yang tampil mungkin tidak 100% terbaru, dan tombol "Muat Ulang
+      // Data" tetap bisa dipakai untuk mencoba lagi kapan saja.
+      const cached = getCachedRawLocally(key);
+      if(cached !== null){
+        window.__storageErrors.push((isTimeout ? `Waktu tunggu habis mengambil "${key}"` : `Gagal mengambil "${key}"`) + ` -- menampilkan data tersimpan terakhir di perangkat ini (mungkin tidak 100% terbaru). Coba "Muat Ulang Data" untuk mengambil data terbaru.`);
+        return cached;
+      }
       window.__storageErrors.push(isTimeout ? `Waktu tunggu habis mengambil "${key}" (server tidak merespons dalam 10 detik, sudah dicoba 3x)` : `Gagal mengambil "${key}" setelah 3x percobaan: ${String(e && e.message || e)}`);
       // PENTING: lempar ulang error ini (jangan kembalikan null begitu saja).
       // null harus HANYA berarti "key ini memang belum ada", bukan "gagal
@@ -1568,7 +1605,9 @@ async function fetchRaw(key){
   }
   try{
     const r = await window.storage.get(key, true);
-    return (r && r.value != null) ? r.value : null;
+    const v = (r && r.value != null) ? r.value : null;
+    cacheRawLocally(key, v);
+    return v;
   }catch(e){ return null; }
 }
 async function saveRawOnce(key, valueStr, timeoutMs){
@@ -1603,6 +1642,13 @@ async function saveRaw(key, valueStr){
       for(let attempt=1; attempt<=2; attempt++){
         try{
           await saveRawOnce(key, valueStr, 9000);
+          // PENTING: begitu TERSIMPAN DI SERVER, langsung perbarui juga
+          // salinan lokal (localStorage) dengan nilai yang BARU disimpan ini
+          // -- supaya kalau nanti ada percobaan BACA yang gagal (jaringan
+          // bermasalah sesaat) dan harus memakai jaring pengaman lokal, yang
+          // ditampilkan adalah data TERBARU ini, bukan data lama sebelum
+          // disimpan (yang akan terlihat seperti perubahan "hilang"/revert).
+          cacheRawLocally(key, valueStr);
           return true;
         }catch(err){
           lastErr = err;
@@ -1633,10 +1679,11 @@ async function deleteRaw(key){
         signal: controller.signal,
       });
       clearTimeout(timer);
+      try{ localStorage.removeItem(LOCAL_CACHE_PREFIX + key); }catch(e){} // jangan sampai cache lokal "menghidupkan kembali" data yang sudah dihapus
       return true;
     }catch(e){ return false; }
   }
-  try{ await window.storage.delete(key, true); return true; }catch(e){ return false; }
+  try{ await window.storage.delete(key, true); try{ localStorage.removeItem(LOCAL_CACHE_PREFIX + key); }catch(e){} return true; }catch(e){ return false; }
 }
 
 /* ============================================================
@@ -1669,55 +1716,15 @@ async function loadList(key){
       if(Array.isArray(part)) all = part;
     }catch(e){}
     if(all.length < CHUNK_SIZE) return all;
-    // PERCEPAT (PENYEBAB UTAMA lambatnya login/laporan tahunan/lapor
-    // akuisisi): potongan (chunk) ke-2 dan seterusnya SEBELUMNYA diambil
-    // SATU PER SATU secara berurutan -- menunggu potongan sebelumnya
-    // selesai baru minta yang berikutnya. Begitu daftar suatu bulan (mis.
-    // Lapor Akuisisi/Layanan) sudah tumbuh lebih dari 50 entri (1 potongan),
-    // ini berarti PULUHAN permintaan jaringan BERURUTAN ke Apps Script --
-    // masing-masing punya overhead sendiri -- dan inilah yang terasa sebagai
-    // "loading lama" di login (yang memuat banyak bulan/jenis data
-    // sekaligus), di Laporan Tahunan (12 bulan x beberapa jenis data), dan
-    // di Lapor Akuisisi (setiap kali simpan, harus ambil dulu data TERBARU
-    // bulan itu sebelum menambahkan satu baris baru).
-    // Sekarang potongan-potongan berikutnya diambil per GELOMBANG (beberapa
-    // sekaligus dalam SATU permintaan gabungan ke server, memakai endpoint
-    // batch yang sama seperti optimasi login), jadi jumlah permintaan
-    // berurutan turun drastis (mis. 200 entri = 4 potongan tambahan yang
-    // dulunya 4 permintaan berurutan, sekarang cukup 1 permintaan gabungan).
-    const CHUNK_BATCH = 12; // cukup untuk 600 entri tambahan (12 x 50) dalam SATU permintaan
     let i = 1;
     while(i < 2000){
-      const batchKeys = [];
-      for(let k=0;k<CHUNK_BATCH;k++) batchKeys.push(`${key}::c${i+k}`);
-      let batchMap = null;
+      const raw = await fetchRaw(`${key}::c${i}`);
+      if(raw === null) break;
       try{
-        batchMap = await preloginBatchFetchOnce(batchKeys, 15000);
-      }catch(e){ batchMap = null; }
-      let hitEnd = false;
-      for(let k=0;k<CHUNK_BATCH;k++){
-        const kk = `${key}::c${i+k}`;
-        let raw;
-        if(batchMap && batchMap.has(kk)){
-          raw = batchMap.get(kk);
-        }else if(batchMap){
-          // Permintaan gabungan berhasil dan cukup jelas key ini memang
-          // tidak ada di server -- tidak perlu dicek satu-satu lagi.
-          raw = null;
-        }else{
-          // Permintaan gabungan gagal (jaringan bermasalah) -- jatuh kembali
-          // ke cara lama (satu per satu) HANYA untuk potongan ini, supaya
-          // hasilnya tetap benar walau sedikit lebih lambat.
-          try{ raw = await fetchRaw(kk); }catch(e){ raw = null; }
-        }
-        if(raw === null){ hitEnd = true; break; }
-        try{
-          const part = JSON.parse(raw);
-          if(Array.isArray(part)) all = all.concat(part);
-        }catch(e){}
-      }
-      i += CHUNK_BATCH;
-      if(hitEnd) break;
+        const part = JSON.parse(raw);
+        if(Array.isArray(part)) all = all.concat(part);
+      }catch(e){}
+      i++;
     }
     return all;
   }
@@ -1769,25 +1776,6 @@ async function saveList(key, arr){
    menimpa perubahan yang baru saja disimpan duluan dengan data basi. Key
    yang berbeda tetap bisa berjalan bersamaan seperti biasa. */
 const __listSaveQueues = new Map();
-/* BUG DIPERBAIKI: Laporan Tahunan & Main Dashboard tidak otomatis
-   ter-update setelah ada laporan baru/perubahan data bulan berjalan.
-   Penyebabnya: __yearlyDataCache (didefinisikan di bawah) menyimpan hasil
-   agregasi 12 bulan supaya pindah tab/ganti tahun terasa instan -- TAPI
-   tidak ada satu pun tempat yang membuang cache itu setelah data BARU
-   disimpan (submit laporan, approve/reject, edit Pipeline, dst). Akibatnya
-   begitu Main Dashboard/Riwayat/Laporan Tahunan pernah dibuka sekali dalam
-   sesi ini, ia akan terus menampilkan data LAMA dari cache walau laporan
-   baru sudah tersimpan di server -- sampai halaman di-reload penuh.
-   Fungsi ini dipanggil dari SETIAP tempat yang menyimpan data bulanan
-   (Laporan Akuisisi/Layanan/Penilaian/Pipeline) supaya cache tahun yang
-   bersangkutan langsung dianggap basi begitu ada perubahan, dan akan
-   diambil ulang dari server saat berikutnya Main Dashboard/Laporan Tahunan
-   dibuka -- tanpa perlu reload halaman. */
-function invalidateYearlyCacheForMonth(monthKey){
-  if(!monthKey) return;
-  const year = Number(String(monthKey).slice(0,4));
-  if(!Number.isNaN(year)) __yearlyDataCache.delete(year);
-}
 async function mutateAndSave(key, stateProp, mutatorFn){
   async function doOne(){
     let fresh;
@@ -1799,13 +1787,7 @@ async function mutateAndSave(key, stateProp, mutatorFn){
     }
     mutatorFn(fresh);
     const ok = await saveList(key, fresh);
-    if(ok){
-      state[stateProp] = fresh;
-      // Kunci format "reports:YYYY-MM" / "layanan:YYYY-MM" / "penilaian:YYYY-MM"
-      // ikut dihitung di agregasi tahunan -- buang cache tahun terkait.
-      const m = /^(?:reports|layanan|penilaian):(\d{4}-\d{2})$/.exec(key);
-      if(m) invalidateYearlyCacheForMonth(m[1]);
-    }
+    if(ok) state[stateProp] = fresh;
     return ok;
   }
   const prevQueue = __listSaveQueues.get(key) || Promise.resolve();
@@ -1915,10 +1897,7 @@ async function mutatePipelineAndSave(mutatorFn, overrideMonth){
     }
     mutatorFn(fresh);
     const ok = await saveList(keyPipeline(month), fresh);
-    if(ok){
-      if(state.month === month) state.pipeline = fresh;
-      invalidateYearlyCacheForMonth(month);
-    }
+    if(ok && state.month === month) state.pipeline = fresh;
     return ok;
   }
   const prevQueue = __pipelineSaveQueues.get(month) || Promise.resolve();
@@ -1969,10 +1948,7 @@ async function submitReportEntry(entry, entryMonth){
     }
     fresh.push(entry);
     const ok = await saveList(keyReports(entryMonth), fresh);
-    if(ok){
-      if(state.month === entryMonth){ state.reports = fresh; rebuildIndex(); }
-      invalidateYearlyCacheForMonth(entryMonth);
-    }
+    if(ok && state.month === entryMonth){ state.reports = fresh; rebuildIndex(); }
     return ok;
   }
   const prevQueue = __reportSubmitQueues.get(entryMonth) || Promise.resolve();
@@ -1995,10 +1971,7 @@ async function submitLayananEntry(entry, entryMonth){
     }
     fresh.push(entry);
     const ok = await saveList(keyLayanan(entryMonth), fresh);
-    if(ok){
-      if(state.month === entryMonth){ state.layanan = fresh; }
-      invalidateYearlyCacheForMonth(entryMonth);
-    }
+    if(ok && state.month === entryMonth){ state.layanan = fresh; }
     return ok;
   }
   const prevQueue = __layananSubmitQueues.get(entryMonth) || Promise.resolve();
@@ -2739,7 +2712,7 @@ async function loadAndDrawMainDashboard(year){
   }
   let yearly;
   try{
-    // Jaring pengaman KERAS: kalau memuat data 12 bulan macet lebih dari 60
+    // Jaring pengaman KERAS: kalau memuat data 12 bulan macet lebih dari 30
     // detik (jaringan sangat lambat, atau server backend belum ter-update),
     // JANGAN biarkan spinner "Memuat data 12 bulan..." muncul selamanya --
     // tampilkan pesan error yang jelas + tombol coba lagi, seperti perbaikan
@@ -2755,7 +2728,7 @@ async function loadAndDrawMainDashboard(year){
     reportsPromise.catch(err=>{ window.__storageErrors.push(String(err && err.message||err)); });
     yearly = await Promise.race([
       reportsPromise,
-      new Promise((_, reject)=> setTimeout(()=> reject(new Error("Waktu tunggu 60 detik terlampaui")), 60000)),
+      new Promise((_, reject)=> setTimeout(()=> reject(new Error("Waktu tunggu 30 detik terlampaui")), 30000)),
     ]);
   }catch(e){
     if(state.tab !== "maindash") return; // pengguna sudah pindah tab
@@ -2784,7 +2757,7 @@ async function loadAndDrawMainDashboard(year){
     remainderPromise.catch(err=>{ window.__storageErrors.push(String(err && err.message||err)); });
     const remainder = await Promise.race([
       remainderPromise,
-      new Promise((_, reject)=> setTimeout(()=> reject(new Error("timeout 60 detik")), 60000)),
+      new Promise((_, reject)=> setTimeout(()=> reject(new Error("timeout 30 detik")), 30000)),
     ]);
     if(state.tab !== "maindash") return; // pengguna sudah pindah tab
     const yearSelectNow = document.getElementById("mdYearSelect");
@@ -4592,7 +4565,6 @@ function waLink(contact){
 function drawLeadsList(scope){
   updateTaskBell();
   const box = document.getElementById("leadsList");
-  if(!box) return;
   const isAdmin = state.role === "admin";
   const priority = Array.isArray(CFG.leadsPriorityProducts) ? CFG.leadsPriorityProducts : [];
   const priorityIndex = {}; priority.forEach((p,i)=>{ priorityIndex[p.product] = i; });
@@ -5840,7 +5812,6 @@ function infoCardHTML(inf, isAdmin, big=false){
 function drawInfoList(){
   const featuredBox = document.getElementById("infoFeatured");
   const box = document.getElementById("infoList");
-  if(!box || !featuredBox) return;
   const isAdmin = state.role === "admin";
   const list = [...state.info].sort((a,b)=>{
     if(!!b.pinned !== !!a.pinned) return (b.pinned?1:0) - (a.pinned?1:0);
@@ -8571,16 +8542,6 @@ async function doLoginFlow(nip, recordActivityNip){
     // aborted" yang dilaporkan.
     const loadPromise = Promise.all([loadConfig(), loadEssentialMonthData()]);
     loadPromise.catch(err=>{ window.__storageErrors.push(String(err && err.message||err)); });
-    // BUG DIPERBAIKI: kalau proses ini "kalah" race (baru selesai SETELAH 8
-    // detik karena Apps Script lambat merespons), sebelumnya TIDAK ADA yang
-    // menggambar ulang layar begitu data itu akhirnya benar-benar siap --
-    // pengguna terjebak melihat Dashboard kosong/tidak lengkap sampai
-    // mereka sendiri pindah tab atau reload halaman penuh (salah satu
-    // sumber keluhan "dashboard tidak otomatis update"). Sekarang begitu
-    // data ini beres, tab yang sedang aktif digambar ulang otomatis.
-    loadPromise.then(()=>{
-      try{ if(state.tab) render(); }catch(e){}
-    });
     await Promise.race([
       loadPromise,
       new Promise((resolve)=> setTimeout(resolve, 8000)),

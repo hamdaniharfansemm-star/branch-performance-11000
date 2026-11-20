@@ -2932,6 +2932,7 @@ function mdFundSectionInnerHTML(){
     <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;margin:-4px 0 8px;flex-wrap:wrap">
       <span class="hint" id="mdFundStamp">${window.__fundStamp ? "Diperbarui "+window.__fundStamp : ""}</span>
       <button class="btn ghost sm" id="mdFundRefresh">🔄 Perbarui data</button>
+      <button class="btn primary sm" id="mdFundPdf">📄 PDF Time Series Dana</button>
     </div>
     <p class="hint" style="margin:-6px 0 12px" id="mdFundHint">Tabungan + Giro + Deposito digabung. Setiap titik adalah nilai di bulan tersebut (bukan akumulasi).</p>
     <div id="mdFundChart"></div>
@@ -2987,6 +2988,13 @@ function wireMainDashFundHandlers(yearly, year){
   }
   const rbtn = document.getElementById("mdFundRefresh");
   if(rbtn) rbtn.onclick = ()=> refreshFundLive(year, yearly, true);
+  const pbtn = document.getElementById("mdFundPdf");
+  if(pbtn) pbtn.onclick = async ()=>{
+    pbtn.disabled = true; const t0 = pbtn.textContent; pbtn.textContent = "⏳ Menyiapkan PDF...";
+    try{ await pdfFundTimeSeries(year); }
+    catch(e){ toast("Gagal membuat PDF, coba lagi", "⚠️"); }
+    finally{ pbtn.disabled = false; pbtn.textContent = t0; }
+  };
   const chipsBox = document.getElementById("mdJenisChips");
   if(chipsBox){
     chipsBox.querySelectorAll(".chip").forEach(btn=>{
@@ -7916,6 +7924,171 @@ function pdfFundLineChart(p, stats){
   });
   doc.setLineWidth(0.5);
   p.setY(y0 + H + 6);
+}
+
+/* Grafik garis vektor generik untuk PDF. Nilai null/undefined = belum ada
+   data (titik tidak digambar). Mendukung nilai negatif (garis nol ditandai). */
+function pdfLineChart(p, rows, series, opts){
+  opts = opts || {};
+  const doc = p.doc, M = p.MARGIN, W = p.PAGE_W - 2*p.MARGIN;
+  const H = opts.height || 170, padL = 66, padR = 10, padT = 8, padB = 22;
+  p.ensureSpace(H + 40);
+  const x0 = M + padL, chW = W - padL - padR;
+  let y0 = p.getY();
+  let lx = M;
+  doc.setFont("helvetica","normal"); doc.setFontSize(8);
+  series.forEach(s=>{
+    doc.setDrawColor(...s.color); doc.setLineWidth(1.8);
+    if(s.dash) doc.setLineDashPattern([3,2],0); else doc.setLineDashPattern([],0);
+    doc.line(lx, y0+2, lx+16, y0+2);
+    doc.setLineDashPattern([],0);
+    doc.setTextColor(60,60,60); doc.text(s.label, lx+20, y0+5);
+    lx += 20 + doc.getTextWidth(s.label) + 16;
+  });
+  y0 += 14;
+  const top = y0 + padT, chH = H - padT - padB;
+  const vals = rows.flatMap(d=>series.map(s=>d[s.key])).filter(v=>v!=null && !isNaN(v));
+  let maxV = Math.max(0, ...vals), minV = Math.min(0, ...vals);
+  if(maxV === minV){ maxV = 1; }
+  const span = maxV - minV;
+  const yOf = v => top + chH - ((v - minV)/span)*chH;
+  doc.setLineWidth(0.4); doc.setFontSize(7);
+  for(let i=0;i<=5;i++){
+    const v = minV + span*(i/5), yy = yOf(v);
+    doc.setDrawColor(225,229,236); doc.line(x0, yy, x0+chW, yy);
+    doc.setTextColor(120,120,120); doc.text(fmtNumId(Math.round(v)), x0-5, yy+2.5, {align:"right"});
+  }
+  if(minV < 0){ doc.setDrawColor(120,120,120); doc.setLineWidth(0.8); doc.line(x0, yOf(0), x0+chW, yOf(0)); }
+  const stepX = chW / (rows.length - 1 || 1);
+  rows.forEach((d,i)=>{
+    const xx = x0 + stepX*i;
+    doc.setTextColor(60,60,60); doc.setFont("helvetica","bold"); doc.setFontSize(7.5);
+    doc.text(MONTH_NAMES[parseInt(d.month.split("-")[1],10)-1].slice(0,3), xx, top+chH+13, {align:"center"});
+  });
+  doc.setDrawColor(150,150,150); doc.setLineWidth(0.6); doc.line(x0, top, x0, top+chH); doc.line(x0, top+chH, x0+chW, top+chH);
+  series.forEach(s=>{
+    const pts = rows.map((d,i)=> (d[s.key]!=null && !isNaN(d[s.key])) ? {x:x0+stepX*i, y:yOf(d[s.key])} : null);
+    doc.setDrawColor(...s.color); doc.setLineWidth(1.6);
+    if(s.dash) doc.setLineDashPattern([3,2],0);
+    for(let i=1;i<pts.length;i++){ if(pts[i-1] && pts[i]) doc.line(pts[i-1].x, pts[i-1].y, pts[i].x, pts[i].y); }
+    doc.setLineDashPattern([],0);
+    doc.setFillColor(...s.color);
+    pts.forEach(pt=>{ if(pt) doc.circle(pt.x, pt.y, 2.2, "F"); });
+  });
+  doc.setLineWidth(0.5);
+  p.setY(y0 + H + 6);
+}
+
+/* Statistik dana satu bulan untuk satu kelompok jenis (dipakai laporan Time Series). */
+function fundMonthStatsFor(mo, jenisList, pipelineEntries){
+  const m = getPipelineMonthCfg(mo);
+  const sum = (obj)=> jenisList.reduce((s,j)=>s+((obj && obj[j])||0),0);
+  const target = sum(m.targets), komitmen = sum(m.komitmen), realisasi = sum(m.realisasi);
+  const mtdBase = sum(m.mtdBase), ytdBase = sum(m.ytdBase), yoyBase = sum(m.yoyBase);
+  const scoped = (pipelineEntries||[]).filter(e=>jenisList.includes(e.jenis));
+  const potensi = pipelineTotalPotensi(scoped);
+  const combined = realisasi + potensi;
+  const has = realisasi>0 || target>0 || komitmen>0 || mtdBase>0 || ytdBase>0 || yoyBase>0;
+  return {month:mo, has, target, komitmen, realisasi, potensi, combined, mtdBase, ytdBase, yoyBase,
+    gap: realisasi - target, pctReal: target>0 ? realisasi/target*100 : null,
+    pctComb: target>0 ? combined/target*100 : null,
+    pctKom: komitmen>0 ? realisasi/komitmen*100 : null,
+    mtd: realisasi - mtdBase, ytd: realisasi - ytdBase, yoy: realisasi - yoyBase,
+    mtdC: combined - mtdBase, ytdC: combined - ytdBase, yoyC: combined - yoyBase};
+}
+
+async function pdfFundTimeSeries(year){
+  try{ await ensureJsPDF(); }catch(e){ toast("Gagal memuat pustaka PDF", "⚠️"); return; }
+  toast("Menyiapkan laporan Time Series (mengambil data terbaru)...", "⏳");
+  // Data TERBARU dari server: config (Target/Komitmen/Realisasi/MTD/YTD/YOY) + pipeline.
+  const fund = await loadYearlyFundPhase(year);
+  const months = []; for(let m=1;m<=12;m++) months.push(monthKeyOf(year, m));
+  const monName = mo => MONTH_NAMES[parseInt(mo.split("-")[1],10)-1];
+  const nowStr = new Date().toLocaleString("id-ID",{dateStyle:"long", timeStyle:"short"});
+  const GROUPS = [
+    {label:"DPK (Tabungan + Giro + Deposito)", list:["Tabungan","Giro","Deposito"]},
+    {label:"CASA (Tabungan + Giro)", list:["Tabungan","Giro"]},
+    {label:"Tabungan", list:["Tabungan"]},
+    {label:"Giro", list:["Giro"]},
+    {label:"Deposito", list:["Deposito"]},
+  ];
+  const data = GROUPS.map(g=>({...g, rows: months.map(mo=>fundMonthStatsFor(mo, g.list, fund.pipelineByMonth[mo]))}));
+  const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) - Laporan Dana Time Series - ${year}`);
+  const C = {target:[224,172,43], komitmen:[140,90,200], comb:[28,138,85], real:[37,99,200], mtd:[37,99,200], ytd:[28,138,85], yoy:[200,90,60]};
+  const dash = "-";
+  const f = v => fmtNumId(v);
+  const pc = v => v==null ? dash : v.toFixed(1)+"%";
+
+  // ===== Halaman 1: ringkasan posisi terakhir semua kelompok =====
+  p.newPage(`Laporan Dana Tahunan ${year} - Time Series Januari s/d Desember`);
+  p.paragraph(`Dicetak: ${nowStr}. Seluruh angka dalam JUTA RUPIAH, nilai posisi di bulan yang bersangkutan (bukan akumulasi). Bulan bertanda "-" belum diisi Admin.`, {size:8.5, color:[120,120,120]});
+  p.setY(p.getY()+4);
+  p.sectionTitle("Posisi Bulan Terakhir yang Terisi - Semua Kelompok");
+  const sumCols = [{label:"KELOMPOK",w:100},{label:"BULAN",w:48},{label:"TARGET",w:52,align:"right"},{label:"KOMITMEN",w:54,align:"right"},{label:"REALISASI",w:54,align:"right"},{label:"POTENSI",w:48,align:"right"},{label:"% CAP.",w:40,align:"right"},{label:"MTD",w:40,align:"right"},{label:"YTD",w:40,align:"right"},{label:"YOY",w:39,align:"right"}];
+  p.tableHeader(sumCols);
+  data.forEach((g,i)=>{
+    const last = [...g.rows].reverse().find(r=>r.has);
+    if(!last){ p.tableRow(sumCols, [g.label.split(" (")[0], dash,dash,dash,dash,dash,dash,dash,dash,dash], {zebra:i%2===0}); return; }
+    const col = last.pctReal==null ? PDF_BLACK : pdfAchievementColor(last.pctReal);
+    p.tableRow(sumCols, [g.label.split(" (")[0], monName(last.month).slice(0,3), f(last.target), f(last.komitmen), f(last.realisasi), f(last.potensi), pc(last.pctReal), f(last.mtd), f(last.ytd), f(last.yoy)],
+      {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,col,last.mtd<0?PDF_RED:PDF_BLACK,last.ytd<0?PDF_RED:PDF_BLACK,last.yoy<0?PDF_RED:PDF_BLACK]});
+  });
+  p.setY(p.getY()+10);
+  p.sectionTitle("Cara Membaca");
+  [
+    "Realisasi, Target, Komitmen, dan basis pembanding diisi Admin per bulan di menu Pipeline Dana (satuan juta).",
+    "Potensi = nominal pipeline berstatus FU + Ontrack. Real+Potensi = Realisasi + Potensi.",
+    "% Capaian = Realisasi / Target. Selisih (Gap) = Realisasi - Target; merah berarti di bawah target.",
+    "MTD = Realisasi - dana bulan lalu. YTD = Realisasi - dana akhir tahun lalu. YOY = Realisasi - dana bulan yang sama tahun lalu. Versi \"+P\" memakai Real+Potensi.",
+    "Warna capaian: merah < 95%, kuning 95-100%, hijau > 100%.",
+  ].forEach(t=> p.paragraph("• "+t, {size:8.8, indent:6}));
+
+  // ===== Per kelompok: 2 halaman =====
+  data.forEach(g=>{
+    const rowsA = g.rows.map(r=>({month:r.month,
+      target: r.target>0?r.target:null, komitmen: r.komitmen>0?r.komitmen:null,
+      realisasi: r.realisasi>0?r.realisasi:null, combined: (r.has && r.realisasi>0)?r.combined:null}));
+    p.newPage(`${g.label} - Realisasi vs Target & Komitmen ${year}`);
+    pdfLineChart(p, rowsA, [
+      {key:"target", label:"Target", color:C.target, dash:true},
+      {key:"komitmen", label:"Komitmen", color:C.komitmen, dash:true},
+      {key:"combined", label:"Realisasi+Potensi", color:C.comb},
+      {key:"realisasi", label:"Realisasi", color:C.real},
+    ]);
+    p.setY(p.getY()+6);
+    const cols = [{label:"BULAN",w:56},{label:"TARGET",w:58,align:"right"},{label:"KOMITMEN",w:58,align:"right"},{label:"REALISASI",w:58,align:"right"},{label:"POTENSI",w:52,align:"right"},{label:"REAL+POT",w:62,align:"right"},{label:"% R/T",w:45,align:"right"},{label:"% R+P/T",w:50,align:"right"},{label:"SELISIH",w:76,align:"right"}];
+    p.tableHeader(cols);
+    g.rows.forEach((r,i)=>{
+      const n = !r.has;
+      const g1 = (r.target>0 && r.realisasi>0) ? r.gap : null;
+      const c1 = r.pctReal==null ? PDF_BLACK : pdfAchievementColor(r.pctReal);
+      const c2 = r.pctComb==null ? PDF_BLACK : pdfAchievementColor(r.pctComb);
+      p.tableRow(cols, [monName(r.month), n?dash:f(r.target), n?dash:f(r.komitmen), n?dash:f(r.realisasi), n?dash:f(r.potensi), n?dash:f(r.combined), n?dash:pc(r.pctReal), n?dash:pc(r.pctComb), g1==null?dash:f(g1)],
+        {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,c1,c2,g1!=null&&g1<0?PDF_RED:PDF_BLACK]});
+    });
+
+    const rowsB = g.rows.map(r=>({month:r.month, mtd: r.has&&r.realisasi>0?r.mtd:null, ytd: r.has&&r.realisasi>0?r.ytd:null, yoy: r.has&&r.realisasi>0?r.yoy:null}));
+    p.newPage(`${g.label} - MTD, YTD & YOY ${year}`);
+    pdfLineChart(p, rowsB, [
+      {key:"mtd", label:"MTD (vs bulan lalu)", color:C.mtd},
+      {key:"ytd", label:"YTD (vs akhir tahun lalu)", color:C.ytd},
+      {key:"yoy", label:"YOY (vs bulan sama tahun lalu)", color:C.yoy},
+    ]);
+    p.setY(p.getY()+6);
+    const cols2 = [{label:"BULAN",w:56},{label:"BLN LALU",w:50,align:"right"},{label:"AKHIR THN",w:52,align:"right"},{label:"BLN THN LL",w:52,align:"right"},{label:"MTD",w:50,align:"right"},{label:"YTD",w:50,align:"right"},{label:"YOY",w:50,align:"right"},{label:"MTD+P",w:51,align:"right"},{label:"YTD+P",w:51,align:"right"},{label:"YOY+P",w:51,align:"right"}];
+    p.tableHeader(cols2);
+    g.rows.forEach((r,i)=>{
+      const n = !r.has;
+      const red = v => v<0 ? PDF_RED : PDF_BLACK;
+      p.tableRow(cols2, [monName(r.month), n?dash:f(r.mtdBase), n?dash:f(r.ytdBase), n?dash:f(r.yoyBase), n?dash:f(r.mtd), n?dash:f(r.ytd), n?dash:f(r.yoy), n?dash:f(r.mtdC), n?dash:f(r.ytdC), n?dash:f(r.yoyC)],
+        {zebra:i%2===0, colors: n ? null : [PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,red(r.mtd),red(r.ytd),red(r.yoy),red(r.mtdC),red(r.ytdC),red(r.yoyC)]});
+    });
+    p.setY(p.getY()+6);
+    p.paragraph("BLN LALU / AKHIR THN / BLN THN LL = basis pembanding yang diisi Admin. Kolom +P memakai Realisasi + Potensi.", {size:8, color:[130,130,130]});
+  });
+
+  p.finish(`Laporan_Dana_TimeSeries_${year}.pdf`);
+  toast("PDF Laporan Dana Time Series berhasil diunduh", "📄");
 }
 
 async function pdfMainDashboardDetail(){

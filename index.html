@@ -1983,6 +1983,53 @@ async function submitLayananEntry(entry, entryMonth){
 /* ============================================================
    MAIN DASHBOARD — data tahunan (agregasi 12 bulan)
    ============================================================ */
+
+function loadListLocal(key){
+  const c0 = getCachedRawLocally(`${key}::c0`);
+  if(c0 !== null){
+    let all = [];
+    try{ const part = JSON.parse(c0); if(Array.isArray(part)) all = part; }catch(e){}
+    if(all.length < CHUNK_SIZE) return all;
+    for(let i=1;i<2000;i++){
+      const raw = getCachedRawLocally(`${key}::c${i}`);
+      if(raw === null) break;
+      try{ const part = JSON.parse(raw); if(Array.isArray(part)) all = all.concat(part); }catch(e){}
+    }
+    return all;
+  }
+  const lg = getCachedRawLocally(key);
+  if(lg !== null){ try{ const arr = JSON.parse(lg); if(Array.isArray(arr)) return arr; }catch(e){} }
+  return null;
+}
+/* Prefetch: legacy + N potongan pertama dalam SATU permintaan gabungan
+   (Laporan: 2 potongan = 100 entri; sisanya 1). Dulu hanya c0 -- bulan dengan >50 laporan harus mengambil c1,
+   c2, ... satu per satu lewat jaringan (penyebab laporan karyawan lambat). */
+function prefetchKeysFor(k, chunks){
+  const out = [k]; const n = chunks || 1;
+  for(let i=0;i<n;i++) out.push(`${k}::c${i}`);
+  return out;
+}
+/* Bangun data tahunan dari salinan lokal secara INSTAN (tanpa jaringan),
+   supaya Main Dashboard langsung tampil dari data terakhir yang diketahui
+   sementara data terbaru diambil di latar belakang. */
+function buildYearlyFromLocal(year){
+  const months = [];
+  for(let m=1;m<=12;m++) months.push(monthKeyOf(year, m));
+  const reportsByMonth = {}, pipelineByMonth = {};
+  let any = false;
+  const legacy = loadListLocal(KEY_PIPELINE_LEGACY) || [];
+  months.forEach(mo=>{
+    const r = loadListLocal(keyReports(mo));
+    if(r !== null) any = true;
+    reportsByMonth[mo] = r || [];
+    const pl = loadListLocal(keyPipeline(mo)) || [];
+    const ids = new Set(pl.map(e=>e.id));
+    const extra = legacy.filter(e=>(e.tanggal||"").slice(0,7)===mo && !ids.has(e.id));
+    pipelineByMonth[mo] = extra.length ? [...pl, ...extra] : pl;
+  });
+  if(!any) return null;
+  return {months, reportsByMonth, pipelineByMonth, layananByMonth:{}, penilaianByMonth:{}, _partial:true};
+}
 const __yearlyDataCache = new Map(); // year -> {reports:[...12 arrays...], pipeline:[...12 arrays...]}
 /* Ambil data Lapor Akuisisi & Pipeline Dana untuk SELURUH 12 bulan di satu
    tahun, dalam SATU permintaan gabungan (sama seperti optimasi login) —
@@ -1998,7 +2045,7 @@ async function loadYearlyReportsPhase(year){
   const months = [];
   for(let m=1;m<=12;m++) months.push(monthKeyOf(year, m));
   const allKeys = [];
-  months.forEach(mo=>{ const rk = keyReports(mo); allKeys.push(rk, `${rk}::c0`); });
+  months.forEach(mo=>{ allKeys.push(...prefetchKeysFor(keyReports(mo), 2)); });
   await preloginBatchFetch(allKeys);
   // PERCEPAT: sebelumnya 12 bulan dimuat SATU PER SATU secara berurutan
   // (nunggu bulan 1 selesai baru mulai bulan 2, dst) -- padahal semuanya
@@ -2051,8 +2098,8 @@ async function loadYearlyFundPhase(year){
   const months = [];
   for(let m=1;m<=12;m++) months.push(monthKeyOf(year, m));
   const allKeys = [];
-  months.forEach(mo=>{ const pk = keyPipeline(mo); allKeys.push(pk, `${pk}::c0`); });
-  allKeys.push(KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`);
+  months.forEach(mo=>{ allKeys.push(...prefetchKeysFor(keyPipeline(mo))); });
+  allKeys.push(...prefetchKeysFor(KEY_PIPELINE_LEGACY));
   await preloginBatchFetch(allKeys);
   let legacyList = [];
   try{ legacyList = await loadList(KEY_PIPELINE_LEGACY); }catch(e){ legacyList = []; }
@@ -2076,8 +2123,7 @@ async function loadYearlyServicePhase(year){
   for(let m=1;m<=12;m++) months.push(monthKeyOf(year, m));
   const allKeys = [];
   months.forEach(mo=>{
-    const lk = keyLayanan(mo), pnk = keyPenilaian(mo);
-    allKeys.push(lk, `${lk}::c0`, pnk, `${pnk}::c0`);
+    allKeys.push(...prefetchKeysFor(keyLayanan(mo)), ...prefetchKeysFor(keyPenilaian(mo)));
   });
   await preloginBatchFetch(allKeys);
   const layananByMonth = {}, penilaianByMonth = {};
@@ -2100,11 +2146,10 @@ async function loadYearlyData(year, forceRefresh){
   for(let m=1;m<=12;m++) months.push(monthKeyOf(year, m));
   const allKeys = [];
   months.forEach(mo=>{
-    const rk = keyReports(mo), pk = keyPipeline(mo), lk = keyLayanan(mo), pnk = keyPenilaian(mo);
-    allKeys.push(rk, `${rk}::c0`, pk, `${pk}::c0`, lk, `${lk}::c0`, pnk, `${pnk}::c0`);
+    allKeys.push(...prefetchKeysFor(keyReports(mo), 2), ...prefetchKeysFor(keyPipeline(mo)), ...prefetchKeysFor(keyLayanan(mo)), ...prefetchKeysFor(keyPenilaian(mo)));
   });
   // Legacy pipeline hanya perlu dicek sekali (bukan per-bulan) untuk migrasi.
-  allKeys.push(KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`);
+  allKeys.push(...prefetchKeysFor(KEY_PIPELINE_LEGACY));
   await preloginBatchFetch(allKeys);
   // PERCEPAT: sama seperti loadYearlyReportsPhase/RemainderPhase -- 12
   // bulan diproses BERSAMAAN (Promise.all), bukan berurutan satu per satu.
@@ -2670,7 +2715,11 @@ function aggregateAnnualFundStats(yearly, jenisList){
     const realisasi = jenisList.reduce((s,j)=>s+(mCfg.realisasi[j]||0),0);
     const scoped = (yearly.pipelineByMonth[mo]||[]).filter(e=>jenisList.includes(e.jenis));
     const potensi = pipelineTotalPotensi(scoped);
-    return {month: mo, target, komitmenVal, realisasi, combined: realisasi+potensi};
+    // Bulan tanpa data config sama sekali (Realisasi/Target/Komitmen semua 0)
+    // = belum diisi -> Realisasi+Potensi juga dianggap belum ada data, supaya
+    // grafik tidak anjlok palsu hanya karena ada potensi pipeline.
+    const hasCfg = realisasi>0 || target>0 || komitmenVal>0;
+    return {month: mo, target, komitmenVal, realisasi, combined: hasCfg ? realisasi+potensi : 0};
   });
 }
 /* Tren akuisisi bulanan untuk 1 karyawan (atau semua) & 1 produk (atau
@@ -2763,43 +2812,59 @@ async function loadAndDrawMainDashboard(year){
     window.__curMainYearly = {year, data: cy};
     drawMainDashboardContent(cy, year, content);
     refreshFundLive(year, cy, false); // tampil instan dari cache, lalu segarkan data dana di latar belakang
+    refreshReportsLive(year, cy, content);
     return;
   }
-  let yearly;
+  const sameYear = ()=>{
+    if(state.tab !== "maindash") return false;
+    const ys = document.getElementById("mdYearSelect");
+    return !!ys && parseInt(ys.value,10) === year;
+  };
+  // TAMPIL INSTAN dari salinan lokal (data terakhir yang diketahui), lalu
+  // segarkan dari server di latar belakang -- kunjungan ke-2 dst tidak
+  // menunggu apa pun.
+  let yearly = buildYearlyFromLocal(year);
+  const instant = !!yearly;
+  if(instant){
+    loadingBox.style.display = "none";
+    content.style.display = "block";
+    window.__curMainYearly = {year, data: yearly};
+    drawMainDashboardContent(yearly, year, content);
+  }
+  let fresh = null;
   try{
-    // Jaring pengaman KERAS: kalau memuat data 12 bulan macet lebih dari 30
-    // detik (jaringan sangat lambat, atau server backend belum ter-update),
-    // JANGAN biarkan spinner "Memuat data 12 bulan..." muncul selamanya --
-    // tampilkan pesan error yang jelas + tombol coba lagi, seperti perbaikan
-    // serupa yang sudah diterapkan untuk layar login.
-    // PENTING: promise-nya dibuat DULU dan disimpan di variabel, lalu
-    // .catch() "diam" (silent) dilekatkan TERPISAH sebelum ikut
-    // Promise.race -- ini mencegah "unhandled rejection" kalau promise
-    // asli ini KALAH race (timeout menang duluan) tapi baru gagal
-    // belakangan di latar belakang, TANPA mengubah promise mana yang
-    // menentukan hasil Promise.race itu sendiri (persis penyebab error
-    // yang dilaporkan: "Promise gagal (unhandled): Fetch is aborted").
+    // Jaring pengaman KERAS: spinner tidak boleh menggantung selamanya.
+    // Promise dibuat dulu, .catch() senyap dilekatkan terpisah (mencegah
+    // "unhandled rejection" kalau kalah race).
     const reportsPromise = loadYearlyReportsPhase(year);
     reportsPromise.catch(err=>{ window.__storageErrors.push(String(err && err.message||err)); });
-    yearly = await Promise.race([
+    fresh = await Promise.race([
       reportsPromise,
       new Promise((_, reject)=> setTimeout(()=> reject(new Error("Waktu tunggu 30 detik terlampaui")), 30000)),
     ]);
   }catch(e){
-    if(state.tab !== "maindash") return; // pengguna sudah pindah tab
-    loadingBox.innerHTML = `<p class="hint" style="color:var(--danger)">Gagal memuat data tahun ${year}: ${e && e.message || e}</p><button class="btn ghost sm" id="mdRetryBtn" style="margin-top:10px">🔄 Coba Lagi</button>`;
-    const retryBtn = document.getElementById("mdRetryBtn");
-    if(retryBtn) retryBtn.onclick = ()=> loadAndDrawMainDashboard(year);
-    return;
+    if(state.tab !== "maindash") return;
+    if(!instant){
+      loadingBox.innerHTML = `<p class="hint" style="color:var(--danger)">Gagal memuat data tahun ${year}: ${e && e.message || e}</p><button class="btn ghost sm" id="mdRetryBtn" style="margin-top:10px">🔄 Coba Lagi</button>`;
+      const retryBtn = document.getElementById("mdRetryBtn");
+      if(retryBtn) retryBtn.onclick = ()=> loadAndDrawMainDashboard(year);
+      return;
+    }
   }
-  if(state.tab !== "maindash") return; // pengguna sudah pindah tab selama proses memuat
-  loadingBox.style.display = "none";
-  content.style.display = "block";
-  // Tampilkan LANGSUNG bagian yang cuma butuh data Laporan Akuisisi (Kinerja
-  // Karyawan, Akuisisi Produk, Tren Karyawan) -- tidak perlu menunggu data
-  // Pipeline/Layanan/Penilaian yang jauh lebih besar volumenya.
-  window.__curMainYearly = {year, data: yearly};
-  drawMainDashboardContent(yearly, year, content);
+  if(!sameYear()) return;
+  if(fresh){
+    if(instant){
+      const changed = JSON.stringify(fresh.reportsByMonth) !== JSON.stringify(yearly.reportsByMonth);
+      yearly.reportsByMonth = fresh.reportsByMonth;
+      if(changed) drawMainDashboardContent(yearly, year, content);
+    } else {
+      yearly = fresh;
+      loadingBox.style.display = "none";
+      content.style.display = "block";
+      window.__curMainYearly = {year, data: yearly};
+      drawMainDashboardContent(yearly, year, content);
+    }
+  }
 
   // FASE 2 (latar belakang), DUA bagian TERPISAH & berurutan (berurutan karena
   // cache batch bersifat tunggal): (a) Pipeline -> Laporan Dana, (b) Layanan &
@@ -2934,6 +2999,17 @@ function wireMainDashFundHandlers(yearly, year){
     const act = chipsBox.querySelector(".chip.active");
     redrawFundChart(act ? act.dataset.jenis : "dpk");
   }
+}
+async function refreshReportsLive(year, yearly, content){
+  try{
+    const pr = loadYearlyReportsPhase(year); pr.catch(()=>{});
+    const fresh = await Promise.race([pr, new Promise((_,rej)=>setTimeout(()=>rej(new Error("waktu tunggu")),30000))]);
+    const ys = document.getElementById("mdYearSelect");
+    if(state.tab !== "maindash" || !ys || parseInt(ys.value,10) !== year) return;
+    if(JSON.stringify(fresh.reportsByMonth) === JSON.stringify(yearly.reportsByMonth)) return;
+    yearly.reportsByMonth = fresh.reportsByMonth;
+    drawMainDashboardContent(yearly, year, content);
+  }catch(e){}
 }
 let __fundRefreshing = false, __fundTimer = null;
 async function refreshFundLive(year, yearly, manual){
@@ -7632,7 +7708,7 @@ document.getElementById("roleAdmin").onclick = ()=>{
 // Penanda versi PDF -- ganti setiap kali ada perbaikan pada sistem PDF,
 // supaya mudah dipastikan apakah laporan yang diunduh benar-benar dari
 // versi terbaru (bukan file lama yang belum diperbarui).
-const PDF_BUILD_VERSION = "PDF-v2026.09.08-fix-emdash";
+const PDF_BUILD_VERSION = "PDF-v2026.11.20-maindash-fund";
 function createPdfDoc(subtitleRight){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({unit:"pt", format:"a4"});
@@ -7785,56 +7861,190 @@ async function downloadCurrentPagePDF(){
   }
 }
 
+/* Grafik garis vektor untuk PDF (digambar langsung dengan jsPDF -- tajam di
+   cetak/zoom, tanpa gambar). Nilai <= 0 = belum ada data -> titik tidak
+   digambar (sama seperti grafik di layar). */
+function pdfFundLineChart(p, stats){
+  const doc = p.doc, M = p.MARGIN, W = p.PAGE_W - 2*p.MARGIN;
+  const H = 170, padL = 64, padR = 10, padT = 8, padB = 22;
+  p.ensureSpace(H + 40);
+  const x0 = M + padL, chW = W - padL - padR;
+  let y0 = p.getY();
+  const series = [
+    {key:"target", label:"Target", color:[224,172,43], dash:true},
+    {key:"komitmenVal", label:"Komitmen", color:[140,90,200], dash:true},
+    {key:"combined", label:"Realisasi+Potensi", color:[28,138,85]},
+    {key:"realisasi", label:"Realisasi", color:[37,99,200]},
+  ];
+  // legenda
+  let lx = M;
+  doc.setFont("helvetica","normal"); doc.setFontSize(8);
+  series.forEach(s=>{
+    doc.setDrawColor(...s.color); doc.setLineWidth(1.8);
+    if(s.dash) doc.setLineDashPattern([3,2],0); else doc.setLineDashPattern([],0);
+    doc.line(lx, y0+2, lx+16, y0+2);
+    doc.setLineDashPattern([],0);
+    doc.setTextColor(60,60,60); doc.text(s.label, lx+20, y0+5);
+    lx += 20 + doc.getTextWidth(s.label) + 16;
+  });
+  y0 += 14;
+  const top = y0 + padT, chH = H - padT - padB;
+  const maxV = Math.max(1, ...stats.flatMap(d=>series.map(s=>d[s.key])).filter(v=>v>0));
+  // grid + sumbu Y
+  doc.setLineWidth(0.4); doc.setFontSize(7);
+  for(let i=0;i<=5;i++){
+    const v = maxV*(i/5), yy = top + chH - (v/maxV)*chH;
+    doc.setDrawColor(225,229,236); doc.line(x0, yy, x0+chW, yy);
+    doc.setTextColor(120,120,120); doc.text(fmtNumId(Math.round(v)), x0-5, yy+2.5, {align:"right"});
+  }
+  const stepX = chW / (stats.length - 1 || 1);
+  stats.forEach((d,i)=>{
+    const xx = x0 + stepX*i;
+    doc.setTextColor(60,60,60); doc.setFont("helvetica","bold"); doc.setFontSize(7.5);
+    doc.text(MONTH_NAMES[parseInt(d.month.split("-")[1],10)-1].slice(0,3), xx, top+chH+13, {align:"center"});
+  });
+  doc.setDrawColor(150,150,150); doc.setLineWidth(0.6); doc.line(x0, top+chH, x0+chW, top+chH); doc.line(x0, top, x0, top+chH);
+  // garis + titik
+  series.forEach(s=>{
+    const pts = stats.map((d,i)=> d[s.key] > 0 ? {x:x0+stepX*i, y:top+chH-(d[s.key]/maxV)*chH} : null);
+    doc.setDrawColor(...s.color); doc.setLineWidth(1.6);
+    if(s.dash) doc.setLineDashPattern([3,2],0);
+    for(let i=1;i<pts.length;i++){ if(pts[i-1] && pts[i]) doc.line(pts[i-1].x, pts[i-1].y, pts[i].x, pts[i].y); }
+    doc.setLineDashPattern([],0);
+    doc.setFillColor(...s.color);
+    pts.forEach(pt=>{ if(pt) doc.circle(pt.x, pt.y, 2.2, "F"); });
+  });
+  doc.setLineWidth(0.5);
+  p.setY(y0 + H + 6);
+}
+
 async function pdfMainDashboardDetail(){
   const yearSelectEl = document.getElementById("mdYearSelect");
   const year = parseInt((yearSelectEl && yearSelectEl.value) || state.month.split("-")[0], 10);
-  const yearly = await loadYearlyData(year);
+  // SELALU ambil data TERBARU dari server (bukan cache) supaya PDF akurat.
+  try{ await loadConfig(); }catch(e){}
+  const yearly = await loadYearlyData(year, true);
   const empStats = aggregateAnnualEmployeeStats(yearly);
   const prodStats = aggregateAnnualProductStats(yearly);
-  const fundStats = aggregateAnnualFundStats(yearly, PIPELINE_JENIS);
   const layananStats = aggregateAnnualLayananStats(yearly);
   const penilaianStats = aggregateAnnualPenilaianStats(yearly);
+  const monShort = mo => MONTH_NAMES[parseInt(mo.split("-")[1],10)-1];
+  const nowStr = new Date().toLocaleString("id-ID",{dateStyle:"long", timeStyle:"short"});
 
   const p = createPdfDoc(`${CFG.brandTitle} (${CFG.brandNumber}) - Main Dashboard - ${year}`);
 
-  // Halaman 1: ringkasan + Kinerja Karyawan Tahunan
-  p.newPage(`Main Dashboard - Kinerja Tahunan ${year}`);
-  p.paragraph(`Rangkuman seluruh 12 bulan tahun ${year}.`, {bold:true});
-  p.setY(p.getY()+8);
-  p.sectionTitle("👤 Kinerja Karyawan Tahunan per Produk - 15 Teratas");
+  // ===== LAPORAN DANA TAHUNAN: satu halaman per kelompok (grafik + tabel Jan-Des) =====
+  const GROUPS = [
+    {label:"DPK (Tabungan + Giro + Deposito)", list:["Tabungan","Giro","Deposito"]},
+    {label:"CASA (Tabungan + Giro)", list:["Tabungan","Giro"]},
+    {label:"Tabungan", list:["Tabungan"]},
+    {label:"Giro", list:["Giro"]},
+    {label:"Deposito", list:["Deposito"]},
+  ];
+  const fundCols = [{label:"BULAN",w:50},{label:"TARGET",w:68,align:"right"},{label:"KOMITMEN",w:68,align:"right"},{label:"REALISASI",w:68,align:"right"},{label:"POTENSI",w:58,align:"right"},{label:"REAL+POTENSI",w:78,align:"right"},{label:"% CAPAIAN",w:50,align:"right"},{label:"SELISIH",w:75,align:"right"}];
+  GROUPS.forEach((g, gi)=>{
+    const stats = aggregateAnnualFundStats(yearly, g.list);
+    p.newPage(gi===0 ? `Laporan Dana Tahunan ${year} - Januari s/d Desember` : `Laporan Dana Tahunan ${year} (lanjutan)`);
+    if(gi===0){
+      p.paragraph(`Dicetak: ${nowStr}. Setiap angka adalah nilai di bulan tersebut (bukan akumulasi). Potensi = pipeline berstatus FU + Ontrack. "-" = belum ada data yang diisi Admin.`, {size:8.5, color:[120,120,120]});
+      p.setY(p.getY()+4);
+    }
+    p.sectionTitle(`💰 ${g.label}`.replace("💰 ",""));
+    pdfFundLineChart(p, stats);
+    p.setY(p.getY()+6);
+    p.tableHeader(fundCols);
+    let lastWith = null;
+    stats.forEach((d,i)=>{
+      const noData = d.realisasi<=0 && d.target<=0 && d.komitmenVal<=0;
+      const potensi = Math.max(0, d.combined - d.realisasi);
+      if(!noData) lastWith = d;
+      const pct = d.target>0 ? (d.realisasi/d.target*100) : null;
+      const gap = (d.target>0 && d.realisasi>0) ? d.realisasi - d.target : null;
+      const pctCol = pct==null ? PDF_BLACK : pdfAchievementColor(pct);
+      p.tableRow(fundCols, [
+        monShort(d.month),
+        noData?"-":fmtNumId(d.target), noData?"-":fmtNumId(d.komitmenVal), noData?"-":fmtNumId(d.realisasi),
+        noData?"-":fmtNumId(potensi), noData?"-":fmtNumId(d.combined),
+        pct==null?"-":pct.toFixed(1)+"%", gap==null?"-":fmtNumId(gap)
+      ], {zebra:i%2===0, colors: noData ? [PDF_BLACK,[170,170,170],[170,170,170],[170,170,170],[170,170,170],[170,170,170],[170,170,170],[170,170,170]] : [PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,pctCol, gap!=null&&gap<0?PDF_RED:PDF_BLACK]});
+    });
+    p.setY(p.getY()+6);
+    if(lastWith){
+      const pot = Math.max(0, lastWith.combined - lastWith.realisasi);
+      p.paragraph(`Posisi terakhir (${monShort(lastWith.month)}): Realisasi ${fmtNumId(lastWith.realisasi)} dari Target ${fmtNumId(lastWith.target)}; Potensi ${fmtNumId(pot)}; Realisasi+Potensi ${fmtNumId(lastWith.combined)}.`, {bold:true, size:8.5});
+    }
+  });
+
+  // ===== Pipeline Dana per bulan per status (semua jenis) =====
+  p.newPage(`Pipeline Dana per Bulan - ${year}`);
+  p.sectionTitle("Nominal Pipeline per Status (Tabungan + Giro + Deposito)");
+  const plCols = [{label:"BULAN",w:60},{label:"FU",w:85,align:"right"},{label:"ONTRACK",w:85,align:"right"},{label:"SUDAH MASUK",w:95,align:"right"},{label:"CANCEL",w:85,align:"right"},{label:"JUMLAH ENTRI",w:65,align:"right"}];
+  p.tableHeader(plCols);
+  yearly.months.forEach((mo,i)=>{
+    const es = (yearly.pipelineByMonth[mo]||[]).filter(e=>PIPELINE_JENIS.includes(e.jenis));
+    const none = es.length===0;
+    p.tableRow(plCols, [monShort(mo),
+      none?"-":fmtNumId(pipelineSum(es,["FU"])), none?"-":fmtNumId(pipelineSum(es,["Ontrack"])),
+      none?"-":fmtNumId(pipelineSum(es,["Sudah Masuk"])), none?"-":fmtNumId(pipelineSum(es,["Cancel"])), String(es.length)], {zebra:i%2===0});
+  });
+
+  // ===== Kinerja karyawan: 15 teratas tahunan =====
+  p.newPage(`Kinerja Karyawan Tahunan ${year}`);
+  p.sectionTitle("Kinerja Karyawan Tahunan per Produk - 15 Teratas");
   const empCols = [{label:"#",w:32},{label:"NAMA",w:170},{label:"TIM",w:110},{label:"TOTAL ACCOUNT",w:75,align:"right"},{label:"TARGET TAHUNAN",w:80,align:"right"},{label:"CAPAIAN",w:48,align:"right"}];
   p.tableHeader(empCols);
   empStats.slice(0,15).forEach((e,i)=>{
     const col = pdfAchievementColor(e.pct*100);
     p.tableRow(empCols, [`${i+1}`, e.name, e.team, e.totalAchieved, e.totalTarget, pctStr(e.pct)], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots:{5:col}});
   });
+  p.setY(p.getY()+14);
 
-  // Halaman 2: Akuisisi Produk terhadap Target
+  // Akuisisi karyawan per bulan (Jan-Des), semua karyawan
+  p.sectionTitle("Akuisisi Karyawan per Bulan (Januari - Desember, laporan disetujui)");
+  const mcols = [{label:"NAMA",w:131}, ...yearly.months.map(mo=>({label:monShort(mo).slice(0,3).toUpperCase(), w:29, align:"right"})), {label:"TOTAL",w:36,align:"right"}];
+  p.tableHeader(mcols);
+  const perEmpMonth = {};
+  yearly.months.forEach(mo=>{
+    (yearly.reportsByMonth[mo]||[]).forEach(r=>{
+      if(r.status!=="approved") return;
+      (perEmpMonth[r.employee] = perEmpMonth[r.employee] || {})[mo] = ((perEmpMonth[r.employee]||{})[mo]||0) + Number(r.amount||0);
+    });
+  });
+  const colTotals = {};
+  empStats.forEach((e,i)=>{
+    const row = perEmpMonth[e.name] || {};
+    let tot = 0;
+    const vals = yearly.months.map(mo=>{ const v = row[mo]||0; tot += v; colTotals[mo]=(colTotals[mo]||0)+v; return v ? String(v) : "-"; });
+    p.tableRow(mcols, [e.name, ...vals, String(tot)], {zebra:i%2===0});
+  });
+  let gt = 0; const tv = yearly.months.map(mo=>{ gt += colTotals[mo]||0; return String(colTotals[mo]||0); });
+  p.tableRow(mcols, ["TOTAL", ...tv, String(gt)], {bold:true});
+
+  // ===== Akuisisi produk =====
   p.newPage(`Akuisisi Produk terhadap Target - Tahunan ${year}`);
-  p.sectionTitle("📦 Akuisisi Produk terhadap Target - Tahunan");
+  p.sectionTitle("Akuisisi Produk terhadap Target - Tahunan");
   const prodCols = [{label:"PRODUK",w:130},{label:"ACCOUNT TERCAPAI",w:100,align:"right"},{label:"TARGET TAHUNAN",w:100,align:"right"},{label:"CAPAIAN",w:80,align:"right"}];
   p.tableHeader(prodCols);
   prodStats.forEach((d,i)=>{
     const col = d.target>0 ? pdfAchievementColor(d.pct*100) : PDF_BLACK;
     p.tableRow(prodCols, [d.product, d.achieved, d.target, d.target>0?pctStr(d.pct):"-"], {zebra:i%2===0, colors:[PDF_BLACK,PDF_BLACK,PDF_BLACK,col], dots: d.target>0?{3:col}:null});
   });
-
-  // Halaman 3: Laporan Dana Tahunan
-  p.newPage(`Laporan Dana Tahunan ${year}`);
-  p.sectionTitle("💰 Laporan Dana Tahunan - DPK (Tabungan+Giro+Deposito), per Bulan");
-  const fundCols = [{label:"BULAN",w:75},{label:"REALISASI",w:100,align:"right"},{label:"REALISASI+POTENSI",w:100,align:"right"},{label:"TARGET",w:80,align:"right"},{label:"KOMITMEN",w:80,align:"right"}];
-  p.tableHeader(fundCols);
-  fundStats.forEach((d,i)=>{
-    const monthName = MONTH_NAMES[parseInt(d.month.split("-")[1],10)-1];
-    const noData = d.realisasi<=0 && d.target<=0 && d.komitmenVal<=0;
-    p.tableRow(fundCols, [monthName, noData?"-":fmtNumId(d.realisasi), noData?"-":fmtNumId(d.combined), noData?"-":fmtNumId(d.target), noData?"-":fmtNumId(d.komitmenVal)], {zebra:i%2===0, colors: noData ? [PDF_BLACK,[170,170,170],[170,170,170],[170,170,170],[170,170,170]] : null});
+  p.setY(p.getY()+14);
+  p.sectionTitle("Akuisisi Produk per Bulan (Januari - Desember)");
+  const pcols = [{label:"PRODUK",w:131}, ...yearly.months.map(mo=>({label:monShort(mo).slice(0,3).toUpperCase(), w:29, align:"right"})), {label:"TOTAL",w:36,align:"right"}];
+  p.tableHeader(pcols);
+  CFG.products.forEach((prod,i)=>{
+    let tot = 0;
+    const vals = yearly.months.map(mo=>{
+      let v = 0; (yearly.reportsByMonth[mo]||[]).forEach(r=>{ if(r.status==="approved" && r.product===prod) v += Number(r.amount||0); });
+      tot += v; return v ? String(v) : "-";
+    });
+    p.tableRow(pcols, [prod, ...vals, String(tot)], {zebra:i%2===0});
   });
-  p.setY(p.getY()+8);
-  p.paragraph("Bulan bertanda \"-\" berarti belum ada data yang diisi Admin untuk bulan itu.", {size:8.5, color:[130,130,130]});
 
-  // Halaman 4: Layanan & Support Tahunan
+  // ===== Layanan & Support =====
   p.newPage(`Layanan & Support Tahunan ${year}`);
-  p.sectionTitle("🎧 Rata-rata Layanan Nasabah (CS & Teller) - 15 Teratas");
+  p.sectionTitle("Rata-rata Layanan Nasabah (CS & Teller) - 15 Teratas");
   const layCols = [{label:"#",w:32},{label:"NAMA",w:200},{label:"RATA-RATA NASABAH",w:90,align:"right"},{label:"RATA-RATA ANTRIAN",w:85,align:"right"},{label:"RATA-RATA TRANSAKSI",w:88,align:"right"}];
   p.tableHeader(layCols);
   if(!layananStats.length){ p.paragraph(`Belum ada data Layanan di tahun ${year}.`, {size:9, color:[130,130,130]}); }
@@ -7842,8 +8052,7 @@ async function pdfMainDashboardDetail(){
     p.tableRow(layCols, [`${i+1}`, e.name, e.nasabah.toFixed(1), e.antrian.toFixed(1), e.transaksi.toFixed(1)], {zebra:i%2===0});
   });
   p.setY(p.getY()+14);
-
-  p.sectionTitle("🥇 Rata-rata Penilaian Support - 15 Teratas");
+  p.sectionTitle("Rata-rata Penilaian Support - 15 Teratas");
   const penCols = [{label:"#",w:32},{label:"NAMA",w:220},{label:"RATA-RATA SKOR",w:90,align:"right"},{label:"JUMLAH PENILAIAN",w:100,align:"right"}];
   p.tableHeader(penCols);
   if(!penilaianStats.length){ p.paragraph(`Belum ada data Penilaian di tahun ${year}.`, {size:9, color:[130,130,130]}); }

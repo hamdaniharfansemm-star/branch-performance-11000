@@ -1642,6 +1642,7 @@ async function saveRaw(key, valueStr){
       for(let attempt=1; attempt<=2; attempt++){
         try{
           await saveRawOnce(key, valueStr, 9000);
+          try{ __yearlyDataCache.clear(); }catch(_){}
           // PENTING: begitu TERSIMPAN DI SERVER, langsung perbarui juga
           // salinan lokal (localStorage) dengan nilai yang BARU disimpan ini
           // -- supaya kalau nanti ada percobaan BACA yang gagal (jaringan
@@ -2038,6 +2039,57 @@ async function loadYearlyRemainderPhase(year){
   }));
   __loginPrefetchCache = null;
   return {pipelineByMonth, layananByMonth, penilaianByMonth};
+}
+/* FASE 2a: HANYA Pipeline Dana (12 bulan, 1 permintaan gabungan) -- inilah
+   satu-satunya data yang dibutuhkan bagian Laporan Dana (Target/Komitmen/
+   Realisasi sudah ada di config). Legacy pipeline dibaca SEKALI saja (bukan
+   12x seperti loadPipelineForMonth) dan TIDAK menulis apa pun (read-only). */
+async function loadYearlyFundPhase(year){
+  // Muat ulang config dari server dulu (Target/Komitmen/Realisasi bisa diubah
+  // admin dari perangkat lain) -- 1 permintaan kecil, sebelum batch pipeline.
+  try{ await loadConfig(); }catch(e){}
+  const months = [];
+  for(let m=1;m<=12;m++) months.push(monthKeyOf(year, m));
+  const allKeys = [];
+  months.forEach(mo=>{ const pk = keyPipeline(mo); allKeys.push(pk, `${pk}::c0`); });
+  allKeys.push(KEY_PIPELINE_LEGACY, `${KEY_PIPELINE_LEGACY}::c0`);
+  await preloginBatchFetch(allKeys);
+  let legacyList = [];
+  try{ legacyList = await loadList(KEY_PIPELINE_LEGACY); }catch(e){ legacyList = []; }
+  const pipelineByMonth = {};
+  let failed = 0;
+  await Promise.all(months.map(async (mo)=>{
+    try{
+      const list = await loadList(keyPipeline(mo));
+      const ids = new Set(list.map(e=>e.id));
+      const extra = legacyList.filter(e=>(e.tanggal||"").slice(0,7)===mo && !ids.has(e.id));
+      pipelineByMonth[mo] = extra.length ? [...list, ...extra] : list;
+    }catch(e){ failed++; pipelineByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
+  }));
+  __loginPrefetchCache = null;
+  return {pipelineByMonth, failed};
+}
+/* FASE 2b: Layanan & Penilaian (volume terbesar) -- terpisah supaya tidak
+   pernah menghambat/menggagalkan bagian Laporan Dana. */
+async function loadYearlyServicePhase(year){
+  const months = [];
+  for(let m=1;m<=12;m++) months.push(monthKeyOf(year, m));
+  const allKeys = [];
+  months.forEach(mo=>{
+    const lk = keyLayanan(mo), pnk = keyPenilaian(mo);
+    allKeys.push(lk, `${lk}::c0`, pnk, `${pnk}::c0`);
+  });
+  await preloginBatchFetch(allKeys);
+  const layananByMonth = {}, penilaianByMonth = {};
+  let failed = 0;
+  await Promise.all(months.map(async (mo)=>{
+    try{ layananByMonth[mo] = await loadList(keyLayanan(mo)); }
+    catch(e){ failed++; layananByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
+    try{ penilaianByMonth[mo] = await loadList(keyPenilaian(mo)); }
+    catch(e){ failed++; penilaianByMonth[mo] = []; window.__storageErrors.push(String(e && e.message||e)); }
+  }));
+  __loginPrefetchCache = null;
+  return {layananByMonth, penilaianByMonth, failed};
 }
 async function loadYearlyData(year, forceRefresh){
   if(!forceRefresh && __yearlyDataCache.has(year)){
@@ -2707,7 +2759,10 @@ async function loadAndDrawMainDashboard(year){
   if(__yearlyDataCache.has(year) && !__yearlyDataCache.get(year)._partial){
     loadingBox.style.display = "none";
     content.style.display = "block";
-    drawMainDashboardContent(__yearlyDataCache.get(year), year, content);
+    const cy = __yearlyDataCache.get(year);
+    window.__curMainYearly = {year, data: cy};
+    drawMainDashboardContent(cy, year, content);
+    refreshFundLive(year, cy, false); // tampil instan dari cache, lalu segarkan data dana di latar belakang
     return;
   }
   let yearly;
@@ -2743,41 +2798,57 @@ async function loadAndDrawMainDashboard(year){
   // Tampilkan LANGSUNG bagian yang cuma butuh data Laporan Akuisisi (Kinerja
   // Karyawan, Akuisisi Produk, Tren Karyawan) -- tidak perlu menunggu data
   // Pipeline/Layanan/Penilaian yang jauh lebih besar volumenya.
+  window.__curMainYearly = {year, data: yearly};
   drawMainDashboardContent(yearly, year, content);
 
-  // FASE 2 (di latar belakang): lengkapi dengan Pipeline/Layanan/Penilaian,
-  // lalu gambar ulang HANYA bagian yang butuh data itu (Laporan Dana &
-  // Layanan/Support) begitu selesai -- tanpa mengganggu bagian yang sudah
-  // tampil duluan.
+  // FASE 2 (latar belakang), DUA bagian TERPISAH & berurutan (berurutan karena
+  // cache batch bersifat tunggal): (a) Pipeline -> Laporan Dana, (b) Layanan &
+  // Penilaian. Kegagalan satu bagian TIDAK memengaruhi bagian lain, dan
+  // Laporan Dana sudah tampil duluan dari data config (tanpa menunggu apa pun).
+  const stillHere = ()=>{
+    if(state.tab !== "maindash") return false;
+    const ys = document.getElementById("mdYearSelect");
+    return !!ys && parseInt(ys.value,10) === year;
+  };
+  const withTimeout = (p, ms)=> Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error("waktu tunggu terlampaui")), ms))]);
+  const retryHTML = (id)=>`<div class="card glow" style="text-align:center;padding:20px"><p class="hint" style="color:var(--danger)">Gagal memuat bagian ini (jaringan lambat).</p><button class="btn ghost sm" id="${id}" style="margin-top:8px">🔄 Coba Lagi</button></div>`;
+  let fundOk = false, svcOk = false;
   try{
-    // Sama seperti Fase 1: lekatkan .catch() diam SEBELUM Promise.race
-    // untuk mencegah "unhandled rejection" kalau promise ini kalah race
-    // tapi baru gagal belakangan.
-    const remainderPromise = loadYearlyRemainderPhase(year);
-    remainderPromise.catch(err=>{ window.__storageErrors.push(String(err && err.message||err)); });
-    const remainder = await Promise.race([
-      remainderPromise,
-      new Promise((_, reject)=> setTimeout(()=> reject(new Error("timeout 30 detik")), 30000)),
-    ]);
-    if(state.tab !== "maindash") return; // pengguna sudah pindah tab
-    const yearSelectNow = document.getElementById("mdYearSelect");
-    if(!yearSelectNow || parseInt(yearSelectNow.value,10) !== year) return; // pengguna sudah ganti tahun
-    const full = {...yearly, ...remainder, _partial:false};
-    __yearlyDataCache.set(year, full);
-    redrawMainDashFundAndLayanan(full, year);
+    const pr = loadYearlyFundPhase(year); pr.catch(()=>{});
+    const fund = await withTimeout(pr, 45000);
+    if(!stillHere()) return;
+    yearly.pipelineByMonth = fund.pipelineByMonth;
+    fundOk = fund.failed === 0;
+    window.__fundStamp = new Date().toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+    refreshMainDashFund(yearly, year);
   }catch(e){
     window.__storageErrors.push(String(e && e.message||e));
-    // Gagal memuat sisanya -- JANGAN biarkan placeholder "Memuat data
-    // Pipeline Dana..." berputar selamanya; tampilkan pesan gagal yang
-    // jelas supaya pengguna tahu harus buka ulang tab ini untuk mencoba
-    // lagi (bagian lain yang sudah tampil tidak terganggu).
-    if(state.tab !== "maindash") return;
-    const fundBox = document.getElementById("mdSectionFund");
-    const layananBox = document.getElementById("mdSectionLayanan");
-    const failMsg = `<div class="card glow" style="text-align:center;padding:20px"><p class="hint" style="color:var(--danger)">Gagal memuat. Coba buka ulang tab ini.</p></div>`;
-    if(fundBox && fundBox.innerHTML.includes("spinner-ring")) fundBox.innerHTML = failMsg;
-    if(layananBox && layananBox.innerHTML.includes("spinner-ring")) layananBox.innerHTML = failMsg;
+    if(stillHere()){
+      const hint = document.getElementById("mdFundHint");
+      if(hint) hint.textContent += " (Data Potensi pipeline gagal dimuat; angka Target/Komitmen/Realisasi tetap tampil.)";
+    }
   }
+  try{
+    const sr = loadYearlyServicePhase(year); sr.catch(()=>{});
+    const svc = await withTimeout(sr, 45000);
+    if(!stillHere()) return;
+    yearly.layananByMonth = svc.layananByMonth;
+    yearly.penilaianByMonth = svc.penilaianByMonth;
+    svcOk = svc.failed === 0;
+    const layananBox = document.getElementById("mdSectionLayanan");
+    if(layananBox) layananBox.innerHTML = mdLayananSectionInnerHTML(aggregateAnnualLayananStats(yearly), aggregateAnnualPenilaianStats(yearly), year);
+  }catch(e){
+    window.__storageErrors.push(String(e && e.message||e));
+    if(stillHere()){
+      const layananBox = document.getElementById("mdSectionLayanan");
+      if(layananBox){
+        layananBox.innerHTML = retryHTML("mdSvcRetry");
+        const rb = document.getElementById("mdSvcRetry");
+        if(rb) rb.onclick = ()=>{ __yearlyDataCache.delete(year); loadAndDrawMainDashboard(year); };
+      }
+    }
+  }
+  if(fundOk && svcOk){ yearly._partial = false; __yearlyDataCache.set(year, yearly); }
 }
 
 function mdLoadingPlaceholder(msg){
@@ -2792,6 +2863,10 @@ function mdFundSectionInnerHTML(){
       <button class="chip" data-jenis="Tabungan">Tabungan</button>
       <button class="chip" data-jenis="Giro">Giro</button>
       <button class="chip" data-jenis="Deposito">Deposito</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;margin:-4px 0 8px;flex-wrap:wrap">
+      <span class="hint" id="mdFundStamp">${window.__fundStamp ? "Diperbarui "+window.__fundStamp : ""}</span>
+      <button class="btn ghost sm" id="mdFundRefresh">🔄 Perbarui data</button>
     </div>
     <p class="hint" style="margin:-6px 0 12px" id="mdFundHint">Tabungan + Giro + Deposito digabung. Setiap titik adalah nilai di bulan tersebut (bukan akumulasi).</p>
     <div id="mdFundChart"></div>
@@ -2845,6 +2920,8 @@ function wireMainDashFundHandlers(yearly, year){
     if(hint) hint.textContent = `${g.label} Setiap titik adalah nilai di bulan tersebut (bukan akumulasi).`;
     drawAnnualFundChart(aggregateAnnualFundStats(yearly, g.list));
   }
+  const rbtn = document.getElementById("mdFundRefresh");
+  if(rbtn) rbtn.onclick = ()=> refreshFundLive(year, yearly, true);
   const chipsBox = document.getElementById("mdJenisChips");
   if(chipsBox){
     chipsBox.querySelectorAll(".chip").forEach(btn=>{
@@ -2854,8 +2931,52 @@ function wireMainDashFundHandlers(yearly, year){
         redrawFundChart(btn.dataset.jenis);
       };
     });
-    redrawFundChart("dpk");
+    const act = chipsBox.querySelector(".chip.active");
+    redrawFundChart(act ? act.dataset.jenis : "dpk");
   }
+}
+let __fundRefreshing = false, __fundTimer = null;
+async function refreshFundLive(year, yearly, manual){
+  if(__fundRefreshing) return;
+  __fundRefreshing = true;
+  const btn = document.getElementById("mdFundRefresh");
+  if(manual && btn){ btn.disabled = true; btn.textContent = "⏳ Memperbarui..."; }
+  try{
+    const pr = loadYearlyFundPhase(year); pr.catch(()=>{});
+    const fund = await Promise.race([pr, new Promise((_,rej)=>setTimeout(()=>rej(new Error("waktu tunggu")),30000))]);
+    const ys = document.getElementById("mdYearSelect");
+    if(state.tab !== "maindash" || !ys || parseInt(ys.value,10) !== year) return;
+    yearly.pipelineByMonth = fund.pipelineByMonth;
+    const d = new Date();
+    window.__fundStamp = d.toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+    refreshMainDashFund(yearly, year);
+    if(manual) toast("Laporan Dana diperbarui", "✅");
+  }catch(e){
+    if(manual) toast("Gagal memperbarui, coba lagi", "⚠️");
+  }finally{
+    __fundRefreshing = false;
+    const b2 = document.getElementById("mdFundRefresh");
+    if(b2){ b2.disabled = false; b2.textContent = "🔄 Perbarui data"; }
+  }
+  if(!__fundTimer){
+    __fundTimer = setInterval(()=>{
+      if(state.tab !== "maindash" || document.hidden) return;
+      const ys = document.getElementById("mdYearSelect"); if(!ys) return;
+      const y = parseInt(ys.value,10), cached = __yearlyDataCache.get(y);
+      if(cached) refreshFundLive(y, cached, false);
+      else if(window.__curMainYearly && window.__curMainYearly.year===y) refreshFundLive(y, window.__curMainYearly.data, false);
+    }, 60000);
+  }
+}
+function refreshMainDashFund(yearly, year){
+  const fundBox = document.getElementById("mdSectionFund");
+  if(!fundBox) return;
+  const chip = fundBox.querySelector(".chip.active");
+  const keep = chip ? chip.dataset.jenis : "dpk";
+  fundBox.innerHTML = mdFundSectionInnerHTML();
+  const box = document.getElementById("mdJenisChips");
+  if(box){ box.querySelectorAll(".chip").forEach(b=>b.classList.toggle("active", b.dataset.jenis===keep)); }
+  wireMainDashFundHandlers(yearly, year);
 }
 /* Dipanggil setelah FASE 2 (Pipeline/Layanan/Penilaian) selesai dimuat di
    latar belakang -- gambar ulang HANYA bagian Laporan Dana & Layanan/
@@ -2920,7 +3041,7 @@ function drawMainDashboardContent(yearly, year, content){
       </div>`,
     fund: `
       <h2 class="sec">💰 Laporan Dana Tahunan (${year}) <span class="line"></span></h2>
-      <div id="mdSectionFund">${yearly._partial ? mdLoadingPlaceholder("Memuat data Pipeline Dana...") : mdFundSectionInnerHTML()}</div>`,
+      <div id="mdSectionFund">${mdFundSectionInnerHTML()}</div>`,
     layanan: `
       <h2 class="sec">🛎️ Layanan &amp; Support Tahunan (${year}) <span class="line"></span></h2>
       <div id="mdSectionLayanan">${yearly._partial ? mdLoadingPlaceholder("Memuat data Layanan & Penilaian...") : mdLayananSectionInnerHTML(layananStats, penilaianStats, year)}</div>`,
@@ -2930,7 +3051,7 @@ function drawMainDashboardContent(yearly, year, content){
 
   drawAnnualProductChart(prodStats);
   drawProductDonutChart(prodStats);
-  if(!yearly._partial) wireMainDashFundHandlers(yearly, year);
+  wireMainDashFundHandlers(yearly, year);
 
   const trendEmpFilterEl = document.getElementById("mdTrendEmpFilter");
   const trendProdFilterEl = document.getElementById("mdTrendProdFilter");
